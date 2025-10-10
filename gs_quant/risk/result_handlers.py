@@ -276,10 +276,15 @@ def map_coordinate_to_column(coordinate_struct, tag):
 
 
 def __is_single_row_2nd_order_risk(risk_key: RiskKey):
-    return risk_key is not None and isinstance(risk_key.risk_measure,
-                                               RiskMeasure) and \
-        risk_key.risk_measure.asset_class == AssetClass.Rates and \
-        risk_key.risk_measure.measure_type in (RiskMeasureType.ParallelGamma, RiskMeasureType.ParallelGammaLocalCcy)
+    # Fast path: return early if risk_key is None or risk_measure is not a RiskMeasure
+    if risk_key is None:
+        return False
+    risk_measure = risk_key.risk_measure
+    if type(risk_measure) is not RiskMeasure:
+        return False
+    # Compare enum using 'is' for singleton enums and group both measure_type checks into a set for fast lookup
+    return (risk_measure.asset_class is AssetClass.Rates and
+            risk_measure.measure_type in {RiskMeasureType.ParallelGamma, RiskMeasureType.ParallelGammaLocalCcy})
 
 
 def mdapi_second_order_table_handler(result: dict, risk_key: RiskKey, _instrument: InstrumentBase,
