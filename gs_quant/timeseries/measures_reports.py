@@ -1412,8 +1412,9 @@ def _compute_sortino(series):
 
 
 def _rolling_downside_risk(series):
-    negative_devs = series[series < series.mean()] - series.mean()
-    semi_variance_series = (negative_devs ** 2).mean()
+    mean = series.mean()
+    negative_devs = series[series < mean] - mean
+    semi_variance_series = np.square(negative_devs).mean()
     return np.sqrt(semi_variance_series)
 
 
