@@ -703,9 +703,9 @@ def zscores(x: pd.Series, w: Union[Window, int, str] = Window(None, 0)) -> pd.Se
     window. Standard deviation and sample mean are computed over the specified rolling window, then element is
     normalized to provide a rolling z-score:
 
-    :math:`R_t = \\frac { X_t - \\mu }{ \\sigma }`
+    :math:`R_t = \frac { X_t - \mu }{ \sigma }`
 
-    Where :math:`\\mu` and :math:`\\sigma` are sample mean and standard deviation over the given window
+    Where :math:`\mu` and :math:`\sigma` are sample mean and standard deviation over the given window
 
     If window is not provided, computes z-score relative to mean and standard deviation over the full series
 
@@ -740,7 +740,15 @@ def zscores(x: pd.Series, w: Union[Window, int, str] = Window(None, 0)) -> pd.Se
     if not isinstance(w.w, int):
         w = normalize_window(x, w)
         dt_idx = pd.DatetimeIndex(x.index).date
-        values = [_zscore(x.loc[(dt_idx > (idx - w.w).date()) & (dt_idx <= idx)]) for idx in dt_idx]
+        # OPTIMIZATION: Use searchsorted for window calculation (O(n) instead of O(n^2) for mask)
+        dt_idx_arr = np.array(dt_idx)
+        # Construct array of window start dates for each index efficiently.
+        window_offsets = np.array([(idx - w.w).date() for idx in dt_idx])
+        positions = np.searchsorted(dt_idx_arr, window_offsets, side='right')
+        # For each observation, select the corresponding window and compute zscore
+        values = [
+            _zscore(x.iloc[positions[i]:i+1]) for i in range(len(x))
+        ]
         return apply_ramp(pd.Series(values, index=x.index, dtype=np.dtype(float)), w)
     else:
         return apply_ramp(x.rolling(w.w, 0).apply(_zscore, raw=False), w)
