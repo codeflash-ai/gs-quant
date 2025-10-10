@@ -55,17 +55,18 @@ class SIR(CompartmentalModel):
         """
         s, i, r = xs
 
-        if isinstance(parameters, Parameters):
+        if type(parameters) is tuple:
+            beta, gamma, N = parameters
+        elif isinstance(parameters, Parameters):
             beta = parameters['beta'].value
             gamma = parameters['gamma'].value
             N = parameters['N'].value
-        elif isinstance(parameters, tuple):
-            beta, gamma, N = parameters
         else:
             raise ValueError("Cannot recognize parameter input")
 
-        dSdt = - beta * s * i / N
-        dIdt = beta * s * i / N - gamma * i
+        beta_si_N = beta * s * i / N
+        dSdt = - beta_si_N
+        dIdt = beta_si_N - gamma * i
         dRdt = gamma * i
 
         return dSdt, dIdt, dRdt
