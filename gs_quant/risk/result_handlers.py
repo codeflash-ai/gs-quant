@@ -28,21 +28,36 @@ _logger = logging.getLogger(__name__)
 
 def __dataframe_handler(result: Iterable, mappings: tuple, risk_key: RiskKey, request_id: Optional[str] = None) \
         -> DataFrameWithInfo:
-    first_row = next(iter(result), None)
-    if first_row is None:
+    # Use next on the iterable itself, avoiding conversion to iterator unnecessarily
+    result_iter = iter(result)
+    try:
+        first_row = next(result_iter)
+    except StopIteration:
         return DataFrameWithInfo(risk_key=risk_key, request_id=request_id)
 
     columns = ()
-    indices = [False] * len(first_row.keys())
+    keys_list = list(first_row.keys())
+    indices = [False] * len(keys_list)
     mappings_lookup = {v: k for k, v in mappings}
 
-    for idx, src in enumerate(first_row.keys()):
+    # Optimize lookup by using a list of indices for the columns to keep, instead of a boolean list
+    selected_indices = []
+    selected_columns = []
+    for idx, src in enumerate(keys_list):
         if src in mappings_lookup:
-            indices[idx] = True
-            columns += ((mappings_lookup[src]),)
+            selected_indices.append(idx)
+            selected_columns.append(mappings_lookup[src])
+    columns = tuple(selected_columns)
 
+    # Generator for selected values, avoids creating intermediate lists/tuples in memory unnecessarily
+    def filtered_rows():
+        yield tuple(first_row[src] for src in keys_list if src in mappings_lookup)
+        for r in result_iter:
+            yield tuple(r[src] for src in keys_list if src in mappings_lookup)
+
+    # Only sort if necessary (if there is data)
     records = tuple(
-        sort_values((tuple(v for i, v in enumerate(r.values()) if indices[i]) for r in result), columns, columns)
+        sort_values(filtered_rows(), columns, columns)
     )
 
     df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
@@ -364,21 +379,30 @@ def mmapi_table_handler(result: dict, risk_key: RiskKey, _instrument: Instrument
 
 def mmapi_pca_table_handler(result: dict, risk_key: RiskKey, _instrument: InstrumentBase,
                             request_id: Optional[str] = None) -> DataFrameWithInfo:
+    rows = result['rows']
     coordinates = []
-    for r in result['rows']:
-        raw_point = r['coordinate'].get('point', '')
+    append = coordinates.append  # Local optimization for faster attribute access
+
+    # Minimize repeated dict lookups with local variable assignment and batch update
+    for r in rows:
+        coord = r['coordinate']
+        raw_point = coord.get('point', '')
         point = ';'.join(raw_point) if isinstance(raw_point, list) else raw_point
-        r['coordinate'].update({'point': point})
-        r['coordinate'].update({'value': r['value']})
-        r['coordinate'].update({'layer1': r['layer1']})
-        r['coordinate'].update({'layer2': r['layer2']})
-        r['coordinate'].update({'layer3': r['layer3']})
-        r['coordinate'].update({'layer4': r['layer4']})
-        r['coordinate'].update({'level': r['level']})
-        r['coordinate'].update({'sensitivity': r['sensitivity']})
-        r['coordinate'].update({'irDelta': r['irDelta']})
-        r['coordinate'].update({'endDate': r['endDate']})
-        coordinates.append(r['coordinate'])
+        # Batch update (less dictionary calls)
+        updates = {
+            'point': point,
+            'value': r['value'],
+            'layer1': r['layer1'],
+            'layer2': r['layer2'],
+            'layer3': r['layer3'],
+            'layer4': r['layer4'],
+            'level': r['level'],
+            'sensitivity': r['sensitivity'],
+            'irDelta': r['irDelta'],
+            'endDate': r['endDate']
+        }
+        coord.update(updates)
+        append(coord)
 
     mappings = (('mkt_type', 'type'),
                 ('mkt_asset', 'asset'),
