@@ -64,13 +64,14 @@ class WorkspaceCallToAction:
 
     @classmethod
     def from_dict(cls, obj):
+        from_dict = RelatedLink.from_dict
         actions = []
         for action in obj['actions']:
-            if isinstance(action, Dict):
-                actions.append(RelatedLink.from_dict(action))
+            if isinstance(action, dict):
+                actions.append(from_dict(action))
             else:
                 actions.append(action)
-        return WorkspaceCallToAction(actions=actions, text=obj['text'], name=obj['name'])
+        return cls(actions=actions, text=obj['text'], name=obj['name'])
 
 
 class WorkspaceTab:
