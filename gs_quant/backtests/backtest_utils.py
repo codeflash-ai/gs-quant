@@ -27,6 +27,7 @@ from gs_quant.common import CurrencyName
 from gs_quant.datetime.relative_date import RelativeDate
 from gs_quant.instrument import Instrument
 from gs_quant.timeseries import interpolate, Interpolate
+from collections.abc import Iterable
 
 
 class CalcType(Enum):
@@ -50,13 +51,10 @@ def make_list(thing):
         return []
     if isinstance(thing, str):
         return [thing]
+    elif isinstance(thing, Iterable):
+        return list(thing)
     else:
-        try:
-            iter(thing)
-        except TypeError:
-            return [thing]
-        else:
-            return list(thing)
+        return [thing]
 
 
 final_date_cache = {}

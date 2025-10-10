@@ -412,57 +412,80 @@ class ExitTradeActionImpl(ActionHandler):
 
         for s in make_list(state):
             trades_to_remove = []
-            if self.action.priceable_names is None:
-                current_trade_names = [i.name for i in list(backtest.portfolio_dict[s].all_instruments)]
+            trades_to_remove_names = set()
+            action_priceable_names = self.action.priceable_names
+            portfolio_dict = backtest.portfolio_dict
+            results = backtest.results
 
-            fut_dates = list(filter(lambda d: d >= s and type(d) is dt.date, backtest.states))
+            # Precompute current_trade_names if necessary
+            current_trade_names = None
+            if action_priceable_names is None:
+                current_trade_names = [i.name for i in list(portfolio_dict[s].all_instruments)]
+                current_trade_names_set = set(current_trade_names)
+
+            fut_dates = [d for d in backtest.states if d >= s and type(d) is dt.date]
             for port_date in fut_dates:
-                res_fut = []
-                res_futures = []
-                pos_fut = list(backtest.portfolio_dict[port_date].all_instruments)
-                if backtest.results[port_date]:  # there are results in future dates which need removing
-                    res_fut = list(backtest.results[port_date].portfolio.all_instruments)
-                    res_futures = list(backtest.results[port_date].futures)
-
-                # We expect tradable names to be defined as <ActionName>_<TradeName>_<TradeDate>
-                if self.action.priceable_names:
-                    # List of trade names provided -> TradeDate <= exit trigger date and TradeName is present in list
-                    port_indexes_to_remove = [i for i, x in enumerate(pos_fut) if
-                                              dt.datetime.strptime(x.name.split('_')[-1], '%Y-%m-%d').date() <= s and
-                                              x.name.split('_')[-2] in self.action.priceable_names]
-                    result_indexes_to_remove = [i for i, x in enumerate(res_fut) if
-                                                dt.datetime.strptime(x.name.split('_')[-1], '%Y-%m-%d').date() <= s and
-                                                x.name.split('_')[-2] in self.action.priceable_names]
+                # Avoid repeated list() conversion
+                pos_fut = list(portfolio_dict[port_date].all_instruments)
+                result_obj = results[port_date]
+                if result_obj:
+                    res_fut = list(result_obj.portfolio.all_instruments)
+                    res_futures = list(result_obj.futures)
                 else:
-                    # List of trade names not provided -> TradeDate <= exit trigger date and trade present on trigger
-                    # date
-                    port_indexes_to_remove = [i for i, x in enumerate(pos_fut) if x.name in current_trade_names]
-                    result_indexes_to_remove = [i for i, x in enumerate(res_fut) if x.name in current_trade_names]
+                    res_fut = []
+                    res_futures = []
 
+                # Precompute indexes to remove
+                if action_priceable_names:
+                    priceable_names_set = set(action_priceable_names)
+                    def check_name(x):
+                        parts = x.name.split('_')
+                        trade_date = dt.datetime.strptime(parts[-1], '%Y-%m-%d').date()
+                        trade_name = parts[-2]
+                        return trade_date <= s and trade_name in priceable_names_set
+
+                    port_indexes_to_remove = [i for i, x in enumerate(pos_fut) if check_name(x)]
+                    result_indexes_to_remove = [i for i, x in enumerate(res_fut) if check_name(x)]
+                else:
+                    # Use set for O(1) name lookup
+                    port_indexes_to_remove = [i for i, x in enumerate(pos_fut) if x.name in current_trade_names_set]
+                    result_indexes_to_remove = [i for i, x in enumerate(res_fut) if x.name in current_trade_names_set]
+
+                # Remove from portfolios and accumulate trades_to_remove
                 for index in sorted(port_indexes_to_remove, reverse=True):
-                    # Get list of trades that have been removed to check for their future cash flow date
-                    if pos_fut[index].name not in trades_to_remove:
+                    name = pos_fut[index].name
+                    if name not in trades_to_remove_names:
                         trades_to_remove.append(pos_fut[index])
+                        trades_to_remove_names.add(name)
                     del pos_fut[index]
                 for index in sorted(result_indexes_to_remove, reverse=True):
                     del res_fut[index]
                     del res_futures[index]
-                backtest.portfolio_dict[port_date] = Portfolio(tuple(pos_fut))
+                portfolio_dict[port_date] = Portfolio(tuple(pos_fut))
                 if result_indexes_to_remove:
-                    backtest.results[port_date] = PortfolioRiskResult(Portfolio(res_fut),
-                                                                      backtest.results[port_date].risk_measures,
-                                                                      res_futures)
+                    results[port_date] = PortfolioRiskResult(
+                        Portfolio(res_fut),
+                        result_obj.risk_measures,
+                        res_futures
+                    )
 
+            # Prepare names set for batch lookups
+            trades_to_remove_names_for_cp = trades_to_remove_names
             for cp_date, cp_list in list(backtest.cash_payments.items()):
                 if cp_date > s:
+                    cp_trade_names = {cp.trade.name for cp in cp_list}
                     indexes_to_remove = [i for i, cp in enumerate(cp_list)
-                                         if cp.trade.name in [x.name for x in trades_to_remove]]
+                                         if cp.trade.name in trades_to_remove_names_for_cp]
                     for index in sorted(indexes_to_remove, reverse=True):
                         cp = cp_list[index]
-                        prev_pos = [i for i, x in enumerate(backtest.cash_payments[s]) if cp.trade.name == x.trade.name]
+                        # Use set for previously removed trade names on trigger date
+                        trigger_cp_names = {x.trade.name for x in backtest.cash_payments[s]}
                         # If trade already exists in exit trigger date cash payments, net out the position
-                        if prev_pos:
-                            backtest.cash_payments[s][prev_pos[0]].direction += cp.direction
+                        if cp.trade.name in trigger_cp_names:
+                            prev_pos = next((i for i, x in enumerate(backtest.cash_payments[s])
+                                            if cp.trade.name == x.trade.name), None)
+                            if prev_pos is not None:
+                                backtest.cash_payments[s][prev_pos].direction += cp.direction
                         else:
                             cp.effective_date = s
                             backtest.cash_payments[s].append(cp)
@@ -474,15 +497,19 @@ class ExitTradeActionImpl(ActionHandler):
                     if not backtest.cash_payments[cp_date]:
                         del backtest.cash_payments[cp_date]
 
+            # Final pass for trades_to_remove
+            exit_trigger_cp_names = {x.trade.name for x in backtest.cash_payments[s]}
             for trade in trades_to_remove:
-                if trade.name not in [x.trade.name for x in backtest.cash_payments[s]]:
+                if trade.name not in exit_trigger_cp_names:
                     # to_dict omits name
                     trade_instruments = set(t.to_dict() for t in trade.all_instruments) if \
                         isinstance(trade, Portfolio) else {trade.to_dict()}
                     # find TCE corresponding to trade
-                    trade_tce = [tce for tce in backtest.transaction_cost_entries[s] if
-                                 set(i.to_dict() for i in tce.all_instruments) == trade_instruments]
-                    tce = trade_tce[0] if trade_tce else None
+                    tce = next(
+                        (tce for tce in backtest.transaction_cost_entries[s]
+                         if set(i.to_dict() for i in tce.all_instruments) == trade_instruments),
+                        None
+                    )
                     backtest.cash_payments[s].append(CashPayment(trade, effective_date=s, transaction_cost_entry=tce))
 
         return backtest
