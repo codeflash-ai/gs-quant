@@ -343,7 +343,7 @@ def encode_instrument(instrument: Optional[Instrument]) -> Optional[dict]:
 
 def encode_instruments(instruments: Optional[Iterable[Instrument]]) -> Optional[Iterable[Optional[dict]]]:
     if instruments is not None:
-        return [encode_instrument(i) for i in instruments]
+        return [i.to_dict() if i is not None else None for i in instruments]
 
 
 global_config.decoders[Instrument] = Instrument.from_dict
