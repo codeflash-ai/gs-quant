@@ -60,8 +60,10 @@ def __dataframe_handler_unsorted(result: Iterable, mappings: tuple, date_cols: t
     records = ([row.get(field_from) for field_to, field_from in mappings] for row in result)
     df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
     df.columns = [m[0] for m in mappings]
+    
+    strptime = dt.datetime.strptime
     for dt_col in date_cols:
-        df[dt_col] = df[dt_col].map(lambda x: dt.datetime.strptime(x, '%Y-%m-%d').date() if isinstance(x, str) else x)
+        df[dt_col] = [strptime(x, '%Y-%m-%d').date() if isinstance(x, str) else x for x in df[dt_col]]
 
     return df
 
