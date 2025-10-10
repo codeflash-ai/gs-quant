@@ -40,6 +40,15 @@ from gs_quant.timeseries import plot_measure_entity, beta, correlation, max_draw
 from gs_quant.timeseries.algebra import geometrically_aggregate
 from gs_quant.timeseries.measures import _extract_series_from_df, SecurityMaster, AssetIdentifier
 
+_WINDOW_PATTERN = re.compile(r'(\d+)([dwmy])', re.IGNORECASE)
+
+_UNIT_MULTIPLIERS = {
+    'd': 1,
+    'w': 5,
+    'm': 22,
+    'y': 252
+}
+
 
 class Unit(Enum):
     NOTIONAL = 'Notional'
@@ -1487,18 +1496,13 @@ def _replay_historical_factor_moves_on_latest_positions(report_id: str, factors:
 def _parse_window(window: Union[int, str]):
     if isinstance(window, int):
         return window
-    match = re.fullmatch(r'(\d+)([dwmy])', window.strip().lower())
+    s = window.strip().lower()
+    # Use the compiled pattern's fullmatch for improved performance
+    match = _WINDOW_PATTERN.fullmatch(s)
     if match is None:
         raise MqValueError('Invalid window format, please end with one of: ["d", "w", "m", "y"]')
     value, unit = match.groups()
-    value = int(value)
-    unit_multipliers = {
-        'd': 1,
-        'w': 5,
-        'm': 22,
-        'y': 252
-    }
-    return value * unit_multipliers[unit]
+    return int(value) * _UNIT_MULTIPLIERS[unit]
 
 
 def _get_factor_data(report_id: str, factor_name: str, query_type: QueryType, unit: Unit = Unit.NOTIONAL) -> pd.Series:
