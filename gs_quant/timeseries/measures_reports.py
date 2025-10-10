@@ -500,7 +500,6 @@ def _max_recovery_period(series):
 
 def _drawdown_length(series):
     peak = series[0]
-    drawdown_start = None
     max_drawdown_length = 0
     current_length = 0
 
@@ -508,14 +507,12 @@ def _drawdown_length(series):
         if value >= peak:
             # Reset when a new peak is found
             peak = value
-            drawdown_start = None
             current_length = 0
         else:
             # Track the drawdown length
-            if drawdown_start is None:
-                drawdown_start = value
             current_length += 1
-            max_drawdown_length = max(max_drawdown_length, current_length)
+            if current_length > max_drawdown_length:
+                max_drawdown_length = current_length
 
     return max_drawdown_length
 
