@@ -96,14 +96,24 @@ class BacktestResult:
 
     def get_trade_history(self):
         data = []
+        append = data.append  # localize for performance
         for item in self._results.portfolio:
+            date = item['date']
             for transaction in item['transactions']:
-                trades = list(map(lambda x: dict(
-                    {'date': item['date'], 'quantity': x['quantity'], 'transactionType': transaction['type'],
-                     'price': x['price'], 'cost': transaction.get('cost') if len(transaction['trades']) == 1 else None},
-                    **x['instrument']), transaction['trades']))
-                data = data + trades
-
+                t_type = transaction['type']
+                trades_list = transaction['trades']
+                trades_count = len(trades_list)
+                t_cost = transaction.get('cost')
+                for x in trades_list:
+                    trade = {
+                        'date': date,
+                        'quantity': x['quantity'],
+                        'transactionType': t_type,
+                        'price': x['price'],
+                        'cost': t_cost if trades_count == 1 else None,
+                    }
+                    trade.update(x['instrument'])
+                    append(trade)
         return pd.DataFrame(data)
 
 
