@@ -60,8 +60,19 @@ def __dataframe_handler_unsorted(result: Iterable, mappings: tuple, date_cols: t
     records = ([row.get(field_from) for field_to, field_from in mappings] for row in result)
     df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
     df.columns = [m[0] for m in mappings]
+    
+    # Pre-compiled strptime and date cache for performance
+    _strptime = dt.datetime.strptime
+    _date_cache = {}
+
+    def _parse_date(x):
+        if x not in _date_cache:
+            _date_cache[x] = _strptime(x, '%Y-%m-%d').date()
+        return _date_cache[x]
+
     for dt_col in date_cols:
-        df[dt_col] = df[dt_col].map(lambda x: dt.datetime.strptime(x, '%Y-%m-%d').date() if isinstance(x, str) else x)
+        # Use list comprehension instead of pandas .map for better performance
+        df[dt_col] = [_parse_date(x) if isinstance(x, str) else x for x in df[dt_col].values]
 
     return df
 
