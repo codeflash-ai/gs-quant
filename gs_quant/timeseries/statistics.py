@@ -683,7 +683,13 @@ def _zscore(x):
     if x.size == 1:
         return 0
 
-    return stats.zscore(x, ddof=1)[-1]
+    # Fast path: avoid computing the full zscore array for just the latest value
+    mean = np.mean(x)
+    std = np.std(x, ddof=1)
+    if std == 0:
+        # stats.zscore would return nan in this case; preserve behavior
+        return (x[-1] - mean) / std  # This will be nan or inf
+    return (x[-1] - mean) / std
 
 
 @plot_function
