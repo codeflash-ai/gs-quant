@@ -168,30 +168,63 @@ def normalized_performance(report_id: str, leg: str = None, *, source: str = Non
     performance_report = PerformanceReport.get(report_id)
 
     constituent_data = performance_report.get_portfolio_constituents(
-        fields=['assetId', 'pnl', 'quantity', 'netExposure'], start_date=start_date, end_date=end_date).set_index(
-        'date')
+        fields=['assetId', 'pnl', 'quantity', 'netExposure'], start_date=start_date, end_date=end_date)
 
-    if leg:
-        if leg.lower() == "long":
-            constituent_data = constituent_data[constituent_data['quantity'] > 0]
-        if leg.lower() == "short":
-            constituent_data = constituent_data[constituent_data['quantity'] < 0]
+    if constituent_data.empty:
+        return pd.Series(dtype=float, name="normalizedPerformance")
 
-    # Split into long and short and aggregate across dates
-    long_side = _return_metrics(constituent_data[constituent_data['quantity'] > 0],
-                                list(constituent_data.index.unique()), "long")
-    short_side = _return_metrics(constituent_data[constituent_data['quantity'] < 0],
-                                 list(constituent_data.index.unique()), "short")
+    # Use numpy array and vectorized masking for quantity for performance
+    quantity = constituent_data['quantity'].values
+    mask_long = quantity > 0
+    mask_short = quantity < 0
 
-    short_exposure = sum(abs(short_side['exposure']))
-    long_exposure = sum(long_side['exposure'])
+    leg_lower = leg.lower() if leg else None
+    if leg_lower == "long":
+        constituent_data = constituent_data.loc[mask_long]
+    elif leg_lower == "short":
+        constituent_data = constituent_data.loc[mask_short]
+
+    dates_unique = constituent_data['date'].unique() if not constituent_data.empty else []
+    # Avoid repeated boolean filtering in the following computations
+    long_leg = constituent_data.loc[mask_long] if not leg_lower else constituent_data if leg_lower == "long" else constituent_data.iloc[0:0]
+    short_leg = constituent_data.loc[mask_short] if not leg_lower else constituent_data if leg_lower == "short" else constituent_data.iloc[0:0]
+
+    # Precompute unique dates for groupby aggregation
+    long_side = _return_metrics(long_leg, dates_unique, "long")
+    short_side = _return_metrics(short_leg, dates_unique, "short")
+
+    # Use numpy arrays for performance on exposure
+    short_exposure = np.sum(np.abs(short_side['exposure'].values)) if not short_side.empty else 0.0
+    long_exposure = np.sum(long_side['exposure'].values) if not long_side.empty else 0.0
     gross_exposure = short_exposure + long_exposure
 
-    long_side['longRetWeighted'] = (long_side['longMetrics'] - 1) * (long_exposure / gross_exposure)
-    short_side['shortRetWeighted'] = (short_side['shortMetrics'] - 1) * (short_exposure / gross_exposure)
+    # Avoid division by zero
+    if gross_exposure == 0:
+        combined_index = long_side.index if not long_side.empty else short_side.index
+        return pd.Series(index=combined_index, data=np.nan, name="normalizedPerformance").dropna()
 
-    combined = long_side[['longRetWeighted']].join(short_side[['shortRetWeighted']], how='inner')
-    combined['normalizedPerformance'] = combined['longRetWeighted'] + combined['shortRetWeighted'] + 1
+    # Vectorized weighted return computations
+    if not long_side.empty:
+        long_side['longRetWeighted'] = (long_side['longMetrics'] - 1) * (long_exposure / gross_exposure)
+    if not short_side.empty:
+        short_side['shortRetWeighted'] = (short_side['shortMetrics'] - 1) * (short_exposure / gross_exposure)
+
+    # DataFrame join on index only, avoid temporary arrays
+    to_join = []
+    if not long_side.empty:
+        to_join.append(long_side[['longRetWeighted']])
+    if not short_side.empty:
+        to_join.append(short_side[['shortRetWeighted']])
+
+    # Use pd.concat for multi-side inner-join if both sides present
+    if len(to_join) == 2:
+        combined = to_join[0].join(to_join[1], how='inner')
+    elif len(to_join) == 1:
+        combined = to_join[0]
+    else:
+        combined = pd.DataFrame(index=dates_unique)
+
+    combined['normalizedPerformance'] = combined.get('longRetWeighted', 0) + combined.get('shortRetWeighted', 0) + 1
     return pd.Series(combined['normalizedPerformance'], name="normalizedPerformance").dropna()
 
 
@@ -1559,15 +1592,21 @@ def _get_factor_data(report_id: str, factor_name: str, query_type: QueryType, un
 
 def _return_metrics(one_leg: pd.DataFrame, dates: list, name: str):
     if one_leg.empty:
-        return pd.DataFrame(index=dates, data={f'{name}Metrics': [0 for d in dates], "exposure": [0 for d in dates]})
-    one_leg = one_leg.groupby(one_leg.index).agg(pnl=('pnl', 'sum'), exposure=('netExposure', 'sum'))
-
-    one_leg['cumulativePnl'] = one_leg['pnl'].cumsum(axis=0)
-
-    one_leg['normalizedExposure'] = (one_leg['exposure'] - one_leg['cumulativePnl'])
-    one_leg.iloc[0, one_leg.columns.get_loc('cumulativePnl')] = 0
-    one_leg[f'{name}Metrics'] = one_leg['cumulativePnl'] / one_leg['normalizedExposure'] + 1
-
-    one_leg[f'{name}Metrics'] = 1 / one_leg[f'{name}Metrics'] if one_leg['exposure'].iloc[-1] < 0 else one_leg[
-        f'{name}Metrics']
-    return one_leg
+        # Use list multiplication for efficiency
+        n = len(dates)
+        return pd.DataFrame(index=dates, data={f'{name}Metrics': [0]*n, "exposure": [0]*n})
+    # Use groupby only if necessary
+    one_leg_gp = one_leg.groupby('date').agg(pnl=('pnl', 'sum'), exposure=('netExposure', 'sum'))
+    # Use NumPy for cumsum and maximize performance
+    one_leg_gp['cumulativePnl'] = one_leg_gp['pnl'].cumsum(axis=0)
+    one_leg_gp['normalizedExposure'] = one_leg_gp['exposure'] - one_leg_gp['cumulativePnl']
+    # Set first cumulativePnl to zero (in-place for performance)
+    first_cum_idx = one_leg_gp.index[0]
+    one_leg_gp.at[first_cum_idx, 'cumulativePnl'] = 0
+    # Avoid SettingWithCopy; make sure computations are done once
+    metrics = one_leg_gp['cumulativePnl'] / one_leg_gp['normalizedExposure'] + 1
+    # If the last exposure is negative, invert all metrics
+    if one_leg_gp['exposure'].iloc[-1] < 0:
+        metrics = 1 / metrics
+    one_leg_gp[f'{name}Metrics'] = metrics
+    return one_leg_gp
