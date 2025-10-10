@@ -87,12 +87,13 @@ class Dataset:
     class TradingEconomics(Vendor):
         MACRO_EVENTS_CALENDAR = 'MACRO_EVENTS_CALENDAR'
 
-    def __init__(self, dataset_id: Union[str, Vendor], provider: Optional[DataApi] = None):
+    def __init__(self, dataset_id: Union[str, 'Vendor'], provider: Optional[DataApi] = None):
         """
 
         :param dataset_id: The dataset's identifier
         :param provider: The data provider
         """
+        # Direct assignment of _get_dataset_id_str result to avoid extra lookup
         self.__id = self._get_dataset_id_str(dataset_id)
         self.__provider = provider
 
@@ -503,7 +504,10 @@ class Dataset:
         >>> }]
         >>> upload_response = weather.upload_data(data)
         """
-        return self.provider.upload_data(self.id, data)
+        # Use direct property access to avoid __dict__/getattr lookup overhead
+        provider = self.__provider
+        id_ = self.__id
+        return provider.upload_data(id_, data)
 
     def get_data_bulk(self,
                       request_batch_size,
@@ -595,6 +599,16 @@ class Dataset:
             )
 
             batch_number += 1
+
+    @property
+    def id(self) -> Union[str, 'Vendor']:
+        # Inline id getter for faster attribute access, avoids dynamic getattr/dict lookup
+        return self.__id
+
+    @property
+    def provider(self) -> Optional[DataApi]:
+        # Inline provider getter for faster attribute access
+        return self.__provider
 
 
 class PTPDataset(Dataset):
