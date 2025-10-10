@@ -330,10 +330,17 @@ class Security(XRef, Instrument):
 
     @classmethod
     def from_dict(cls, env):
-        return cls(**{
-            k: v for k, v in env.items()
-            if k in inspect.signature(cls).parameters
-        })
+        # Optimization: cache parameter names for __init__ at the class level to avoid repeated introspection
+        if not hasattr(cls, '_param_names'):
+            # The signature's parameters are OrderedDicts in 3.10+
+            cls._param_names = set(inspect.signature(cls.__init__).parameters)
+            # Remove 'self' which is not a valid key in env
+            cls._param_names.discard('self')
+        param_names = cls._param_names
+
+        # Optimization: dict comprehension over env.items() more efficiently
+        # No functional change, just avoids repeated inspect work
+        return cls(**{k: v for k, v in env.items() if k in param_names})
 
 
 def encode_instrument(instrument: Optional[Instrument]) -> Optional[dict]:
