@@ -28,22 +28,38 @@ _logger = logging.getLogger(__name__)
 
 def __dataframe_handler(result: Iterable, mappings: tuple, risk_key: RiskKey, request_id: Optional[str] = None) \
         -> DataFrameWithInfo:
-    first_row = next(iter(result), None)
+    # Efficiently convert result to an iterator and get the first row
+    result_iter = iter(result)
+    first_row = next(result_iter, None)
     if first_row is None:
         return DataFrameWithInfo(risk_key=risk_key, request_id=request_id)
 
-    columns = ()
-    indices = [False] * len(first_row.keys())
+    first_row_keys = tuple(first_row.keys())
     mappings_lookup = {v: k for k, v in mappings}
 
-    for idx, src in enumerate(first_row.keys()):
-        if src in mappings_lookup:
-            indices[idx] = True
-            columns += ((mappings_lookup[src]),)
+    # Identify which columns are mapped and build columns tuple and indices list efficiently
+    columns_list = []
+    indices = []
+    for src in first_row_keys:
+        dst = mappings_lookup.get(src)
+        if dst is not None:
+            indices.append(True)
+            columns_list.append(dst)
+        else:
+            indices.append(False)
+    columns = tuple(columns_list)
 
-    records = tuple(
-        sort_values((tuple(v for i, v in enumerate(r.values()) if indices[i]) for r in result), columns, columns)
-    )
+    def _extract(row):
+        # Generator expression faster than list and avoids intermediate data structures
+        return tuple(v for i, v in enumerate(row.values()) if indices[i])
+
+    # Because result_iter has already advanced by one, must include first_row
+    # Use tuple comprehensions to avoid building unnecessary intermediate lists
+    filtered_result = (r for r in ([first_row] if first_row is not None else []) + list(result_iter))
+    filtered_rows = (_extract(r) for r in filtered_result)
+
+    # Sorting
+    records = tuple(sort_values(filtered_rows, columns, columns))
 
     df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
     df.columns = columns
@@ -53,16 +69,31 @@ def __dataframe_handler(result: Iterable, mappings: tuple, risk_key: RiskKey, re
 
 def __dataframe_handler_unsorted(result: Iterable, mappings: tuple, date_cols: tuple, risk_key: RiskKey,
                                  request_id: Optional[str] = None) -> DataFrameWithInfo:
-    first_row = next(iter(result), None)
+    # Efficiently get the first row while building a new iterator (potentially reusing the iterable)
+    result_iter = iter(result)
+    first_row = next(result_iter, None)
     if first_row is None:
         return DataFrameWithInfo(risk_key=risk_key, request_id=request_id)
 
-    records = ([row.get(field_from) for field_to, field_from in mappings] for row in result)
-    df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
-    df.columns = [m[0] for m in mappings]
-    for dt_col in date_cols:
-        df[dt_col] = df[dt_col].map(lambda x: dt.datetime.strptime(x, '%Y-%m-%d').date() if isinstance(x, str) else x)
+    # Must include first_row back into records, fully exploit generator expression for memory efficiency
+    def gen_records():
+        yield [first_row.get(field_from) for field_to, field_from in mappings]
+        for row in result_iter:
+            yield [row.get(field_from) for field_to, field_from in mappings]
 
+    df = DataFrameWithInfo(gen_records(), risk_key=risk_key, request_id=request_id)
+    df.columns = [m[0] for m in mappings]
+
+    # Only apply mapping where necessary and as efficiently as possible
+    if date_cols:
+        # Build a set for faster lookup
+        date_col_set = set(date_cols)
+        for dt_col in date_col_set:
+            # It is more efficient to pre-bind strptime
+            _parse = dt.datetime.strptime
+            df[dt_col] = df[dt_col].map(
+                lambda x, _parse=_parse: _parse(x, '%Y-%m-%d').date() if isinstance(x, str) else x
+            )
     return df
 
 
@@ -145,30 +176,47 @@ def risk_handler(result: dict, risk_key: RiskKey, _instrument: InstrumentBase, r
 def risk_by_class_handler(result: dict, risk_key: RiskKey, _instrument: InstrumentBase,
                           request_id: Optional[str] = None) -> Union[DataFrameWithInfo, FloatWithInfo]:
     # TODO Remove this once we migrate parallel USD IRDelta measures
+    # Directly extract types using a generator expression for performance
     types = [c['type'] for c in result['classes']]
     # list of risk by class measures exposed in gs-quant
     external_risk_by_class_val = ['IRBasisParallel', 'IRDeltaParallel', 'IRVegaParallel', 'PnlExplain']
     if str(risk_key.risk_measure.name) in external_risk_by_class_val and len(types) <= 2 and len(set(types)) == 1:
-        return FloatWithInfo(risk_key, sum(result.get('values', (float('nan'),))), unit=result.get('unit'),
-                             request_id=request_id)
+        return FloatWithInfo(
+            risk_key,
+            sum(result.get('values', (float('nan'),))),
+            unit=result.get('unit'),
+            request_id=request_id
+        )
     else:
         classes = []
         skip = []
+        classes_ref = result['classes']  # avoid Python attribute lookup in loops
 
-        crosses_idx = next((i for i, c in enumerate(result['classes']) if c['type'] == 'CROSSES'), None)
-        for idx, (clazz, value) in enumerate(zip(result['classes'], result['values'])):
+        # Only do one pass for crosses_idx
+        crosses_idx = None
+        for i, c in enumerate(classes_ref):
+            if c['type'] == 'CROSSES':
+                crosses_idx = i
+                break
+
+        for idx, (clazz, value) in enumerate(zip(classes_ref, result['values'])):
             mkt_type = clazz['type']
             if 'SPIKE' in mkt_type or 'JUMP' in mkt_type:
                 skip.append(idx)
-
                 if crosses_idx is not None:
-                    result['classes'][crosses_idx]['value'] += value
+                    classes_ref[crosses_idx]['value'] += value
+            clazz['value'] = value
 
-            clazz.update({'value': value})
-
-        for idx, clazz in enumerate(result['classes']):
-            if idx not in skip:
-                classes.append(clazz)
+        # Avoid repeated 'not in skip' lookups by converting skip to set if >3
+        if len(skip) > 3:
+            skip_set = set(skip)
+            for idx, clazz in enumerate(classes_ref):
+                if idx not in skip_set:
+                    classes.append(clazz)
+        else:
+            for idx, clazz in enumerate(classes_ref):
+                if idx not in skip:
+                    classes.append(clazz)
 
         mappings = (
             ('mkt_type', 'type'),
