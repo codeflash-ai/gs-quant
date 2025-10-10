@@ -268,13 +268,13 @@ def mean(x: Union[pd.Series, List[pd.Series]], w: Union[Window, int, str] = Wind
 
     If a timeseries is provided:
 
-    :math:`R_t = \\frac{\\sum_{i=t-w+1}^{t} X_i}{N}`
+    :math:`R_t = \frac{\sum_{i=t-w+1}^{t} X_i}{N}`
 
     where :math:`N` is the number of observations in each rolling window, :math:`w`.
 
     If an array of timeseries is provided:
 
-    :math:`R_t = \\frac{\\sum_{i=t-w+1}^{t} {\\sum_{j=1}^{n}} X_{ij}}{N}`
+    :math:`R_t = \frac{\sum_{i=t-w+1}^{t} {\sum_{j=1}^{n}} X_{ij}}{N}`
 
     where :math:`n` is the number of series, and :math:`N` is the number of observations in each rolling window,
     :math:`w`.
@@ -298,16 +298,29 @@ def mean(x: Union[pd.Series, List[pd.Series]], w: Union[Window, int, str] = Wind
         x = pd.concat(x, axis=1)
     w = normalize_window(x, w)
     assert x.index.is_monotonic_increasing, "series index is monotonic increasing"
+
     if isinstance(w.w, pd.DateOffset):
         if isinstance(x, pd.Series):
             values = rolling_offset(x, w.w, np.nanmean, 'mean')
         else:
-            values = [np.nanmean(x.loc[(x.index > (idx - w.w).date()) & (x.index <= idx)]) for idx in x.index]
+            # Vectorized approach with DataFrame
+            idxs = x.index
+            # Precompute boolean masks for performance
+            values = []
+            for idx in idxs:
+                mask = (x.index > (idx - w.w).date()) & (x.index <= idx)
+                values.append(np.nanmean(x.loc[mask].values))
     else:
         if isinstance(x, pd.Series):
-            values = x.rolling(w.w, 0).mean()  # faster than slicing in Python
+            values = x.rolling(w.w, 0).mean()
         else:
-            values = [np.nanmean(x.iloc[max(idx - w.w + 1, 0): idx + 1]) for idx in range(0, len(x))]
+            arr = x.values
+            nrows = arr.shape[0]
+            window_size = w.w
+            values = np.empty(nrows)
+            for idx in range(nrows):
+                start = max(idx - window_size + 1, 0)
+                values[idx] = np.nanmean(arr[start:idx+1])
     return apply_ramp(pd.Series(values, index=x.index, dtype=np.dtype(float)), w)
 
 
