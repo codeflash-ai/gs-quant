@@ -573,6 +573,7 @@ class GenericEngine(BacktestBaseEngine):
         self._pricing_context_params = None
         self._initial_pricing_context = None
         self._tracing_enabled = False
+        self._null_context = nullcontext()
 
     def get_action_handler(self, action: Action) -> ActionHandler:
         handler_factory = GenericEngineActionFactory(self.action_impl_map)
@@ -656,7 +657,7 @@ class GenericEngine(BacktestBaseEngine):
         if self._tracing_enabled:
             return Tracer(label)
         else:
-            return nullcontext()
+            return self._null_context
 
     def __run(self, strategy, start, end, frequency, states, risks, initial_value, result_ccy, holiday_calendar,
               calc_risk_at_trade_exits, pnl_explain):
