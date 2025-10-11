@@ -63,10 +63,7 @@ def is_instance_or_iterable(o, t):
 
 
 def _get_underscore(arg):
-    if arg not in _rename_cache:
-        _rename_cache[arg] = underscore(arg)
-
-    return _rename_cache[arg]
+    return _rename_cache.setdefault(arg, underscore(arg))
 
 
 def _get_is_supported_generic(arg):
@@ -199,7 +196,7 @@ class DictBase(HashableDict):
         raise AttributeError(f"'{self.__class__.__name__}' has no attribute '{item}'")
 
     def __setattr__(self, key, value):
-        if key in dir(self):
+        if hasattr(self.__class__, key):
             return super().__setattr__(key, value)
         elif self._PROPERTIES and _get_underscore(key) not in self._PROPERTIES:
             raise AttributeError(f"'{self.__class__.__name__}' has no attribute '{key}'")
