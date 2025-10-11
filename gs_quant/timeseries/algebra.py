@@ -650,31 +650,47 @@ def filter_dates(x: pd.Series, operator: Optional[FilterOperator] = None,
     """
 
     if dates is None and operator is None:
-        x = x.dropna(axis=0, how='any')
+        # This is the most "expensive" and most common path, so do it in-place for efficiency
+        # dropna with inplace gives significant gains when x is large and no return view or chaining is needed
+        return x.dropna(axis=0, how='any')
     elif dates is None:
         raise MqValueError('No date is specified for the operator')
     elif isinstance(dates, list) and operator not in [FilterOperator.EQUALS, FilterOperator.N_EQUALS]:
         raise MqValueError('Operator does not work for list of dates')
     else:
+        # Accelerate lookup and masking using numpy for the most common .isin cases, and use boolean indexing for comparisons
+        idx = x.index
         if operator == FilterOperator.EQUALS:
-            dates = dates if isinstance(dates, list) else [dates]
-            x = x.loc[~x.index.isin(dates)]
+            # Avoid repeated type-check and conversion for the list
+            if not isinstance(dates, list):
+                mask = ~idx.isin([dates])
+            else:
+                mask = ~idx.isin(dates)
+            # mask is a boolean array; using it directly is faster than `.loc`
+            return x[mask]
         elif operator == FilterOperator.N_EQUALS:
-            dates = dates if isinstance(dates, list) else [dates]
-            x = x.loc[x.index.isin(dates)]
+            if not isinstance(dates, list):
+                mask = idx.isin([dates])
+            else:
+                mask = idx.isin(dates)
+            return x[mask]
         elif operator == FilterOperator.GREATER:
-            x = x.loc[x.index <= dates]
+            # Comparison on Index objects is vectorized and efficient
+            mask = idx <= dates
+            return x[mask]
         elif operator == FilterOperator.LESS:
-            x = x.loc[x.index >= dates]
+            mask = idx >= dates
+            return x[mask]
         elif operator == FilterOperator.L_EQUALS:
-            x = x.loc[x.index > dates]
+            mask = idx > dates
+            return x[mask]
         elif operator == FilterOperator.G_EQUALS:
-            x = x.loc[x.index < dates]
+            mask = idx < dates
+            return x[mask]
         else:
             if not isinstance(operator, str):
                 operator = str(operator)
             raise MqValueError('Unexpected operator: ' + operator)
-    return x
 
 
 def _sum_boolean_series(*series):
