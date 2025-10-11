@@ -99,7 +99,8 @@ class OrderTWAP(OrderBase):
         return self.quantity
 
     def _short_name(self) -> str:
-        return 'TWAP {0}:{1}'.format(self.window.start, self.window.end)
+        window = self.window  # Local variable for attribute access speed-up
+        return f'TWAP {window.start}:{window.end}'
 
 
 class OrderMarketOnClose(OrderBase):
