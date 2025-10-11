@@ -342,7 +342,10 @@ class RiskModelEntity(Entity):
         return get(self.get_entity(), 'coverage')
 
     def get_term(self) -> Optional[str]:
-        return get(self.get_entity(), 'term')
+        entity = self.get_entity()
+        if entity is not None and isinstance(entity, dict):
+            return entity.get('term')
+        return None
 
     def get_vendor(self) -> Optional[str]:
         return get(self.get_entity(), 'vendor')
