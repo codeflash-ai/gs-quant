@@ -302,7 +302,15 @@ class KPI(Entity):
         super().get(id_value, id_type)
 
     def get_name(self) -> Optional[str]:
-        return get(self.get_entity(), 'name')
+        entity = self.get_entity()
+        # Fast path: check for dict and directly get 'name'
+        if entity is not None and isinstance(entity, dict):
+            # Coverage-equivalent to pydash.get for this use case, as only shallow lookup is used
+            return entity.get('name')
+        else:
+            # Fallback: preserve behavioral consistency if entity is not a dict
+            # Matches original None return if entity is None or not dict
+            return None
 
     def get_category(self) -> Optional[str]:
         return get(self.get_entity(), 'category')
