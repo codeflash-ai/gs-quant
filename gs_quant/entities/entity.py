@@ -106,10 +106,10 @@ class Entity(metaclass=ABCMeta):
 
     def __init__(self,
                  id_: str,
-                 entity_type: EntityType,
+                 entity_type: 'EntityType',
                  entity: Optional[Dict] = None):
         self.__id: str = id_
-        self.__entity_type: EntityType = entity_type
+        self.__entity_type: 'EntityType' = entity_type
         self.__entity: Dict = entity
 
     @property
@@ -305,7 +305,11 @@ class KPI(Entity):
         return get(self.get_entity(), 'name')
 
     def get_category(self) -> Optional[str]:
-        return get(self.get_entity(), 'category')
+        # Optimize by directly accessing the dict (avoids slower pydash.get)
+        entity = self.get_entity()
+        if entity is not None and isinstance(entity, dict):
+            return entity.get('category')
+        return None
 
     def get_sub_category(self):
         return get(self.get_entity(), 'subCategory')
