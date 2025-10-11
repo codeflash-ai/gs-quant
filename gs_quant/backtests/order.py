@@ -84,9 +84,10 @@ class OrderTWAP(OrderBase):
         :param window: TWAP window
         """
         self.window = window
+        self._execution_end_time: dt.datetime = window.end  # Cache for improved performance
 
     def execution_end_time(self) -> dt.datetime:
-        return self.window.end
+        return self._execution_end_time
 
     def _execution_price(self, data_handler: DataHandler) -> float:
         if self.executed_price is None:
