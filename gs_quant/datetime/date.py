@@ -244,12 +244,48 @@ def has_feb_29(start: dt.date, end: dt.date):
     >>> end = date(2020, 3, 15)
     >>> has_feb_29(start, end)
     """
-    feb_29 = False
-    for x in range(1, (end - start).days + 1):
-        date = start + dt.timedelta(days=x)
-        feb_29 = feb_29 | (date.month == 2 and date.day == 29)
+    # Fast direct logic: Find a leap year between start.year + 1 and end.year - 1 first,
+    # then check Feb 29 for start.year and end.year if needed.
+    # Start date is exclusive and end is inclusive, so check from start + 1 to end (inclusive).
 
-    return feb_29
+    # Edge case: if range is less than one day, there's no Feb 29 in it.
+    if (end - start).days < 1:
+        return False
+
+    start_year = start.year
+    end_year = end.year
+
+    # Range is exclusive of start, inclusive of end
+    first_checked_year = start_year
+    last_checked_year = end_year
+
+    # If range falls all within one year
+    if first_checked_year == last_checked_year:
+        if cal.isleap(first_checked_year):
+            leap_day = dt.date(first_checked_year, 2, 29)
+            return start < leap_day <= end
+        else:
+            return False
+
+    # Years strictly between start and end year
+    for year in range(start_year + 1, end_year):
+        if cal.isleap(year):
+            # Feb 29 in [start+1.year, ..., end-1.year] always present
+            return True
+
+    # Check end year for leap day (as end date is inclusive)
+    if cal.isleap(end_year):
+        leap_day = dt.date(end_year, 2, 29)
+        if leap_day <= end and leap_day > start:
+            return True
+
+    # Check start year for leap day
+    if cal.isleap(start_year):
+        leap_day = dt.date(start_year, 2, 29)
+        if leap_day > start and leap_day <= end:
+            return True
+
+    return False
 
 
 def day_count_fraction(
