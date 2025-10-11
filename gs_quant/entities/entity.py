@@ -106,10 +106,10 @@ class Entity(metaclass=ABCMeta):
 
     def __init__(self,
                  id_: str,
-                 entity_type: EntityType,
+                 entity_type: 'EntityType',
                  entity: Optional[Dict] = None):
         self.__id: str = id_
-        self.__entity_type: EntityType = entity_type
+        self.__entity_type: 'EntityType' = entity_type
         self.__entity: Dict = entity
 
     @property
@@ -243,7 +243,14 @@ class Country(Entity):
         return get(self.get_entity(), 'xref.bbid')
 
     def get_alpha2(self):
-        return get(self.get_entity(), 'xref.alpha2')
+        # Optimized inline field extraction avoids the slow pydash.get
+        entity = self.get_entity()
+        # The path is 'xref.alpha2'
+        try:
+            xref = entity['xref']
+            return xref['alpha2']
+        except (TypeError, KeyError):
+            return None
 
     def get_country_code(self):
         return get(self.get_entity(), 'xref.countryCode')
