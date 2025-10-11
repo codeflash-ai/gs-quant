@@ -308,7 +308,10 @@ class KPI(Entity):
         return get(self.get_entity(), 'category')
 
     def get_sub_category(self):
-        return get(self.get_entity(), 'subCategory')
+        entity = self.get_entity()
+        if entity is not None and 'subCategory' in entity:
+            return entity['subCategory']
+        return None
 
 
 class RiskModelEntity(Entity):
