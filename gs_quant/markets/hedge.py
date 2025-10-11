@@ -29,6 +29,7 @@ from gs_quant.errors import MqValueError
 from gs_quant.markets.position_set import PositionSet
 from gs_quant.session import GsSession
 from gs_quant.target.hedge import HedgeObjective, CorporateActionsTypes
+from operator import itemgetter
 
 _logger = logging.getLogger(__name__)
 
@@ -875,7 +876,7 @@ class Hedge:
         :return: dict, list, list - the portfolio, portfolio weights, and number of assets
         """
         portfolio = results["result"]["hedge"]["constituents"]
-        portfolio.sort(key=lambda x: x['weight'], reverse=True)
+        portfolio.sort(key=itemgetter('weight'), reverse=True)
         weights = [asset['weight'] for asset in portfolio]
         asset_numbers = list(range(len(portfolio)))
         return portfolio, weights, asset_numbers
