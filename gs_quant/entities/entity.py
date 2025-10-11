@@ -106,10 +106,10 @@ class Entity(metaclass=ABCMeta):
 
     def __init__(self,
                  id_: str,
-                 entity_type: EntityType,
+                 entity_type: 'EntityType',
                  entity: Optional[Dict] = None):
         self.__id: str = id_
-        self.__entity_type: EntityType = entity_type
+        self.__entity_type: 'EntityType' = entity_type
         self.__entity: Dict = entity
 
     @property
@@ -222,7 +222,11 @@ class Country(Entity):
         super().get(id_value, id_type)
 
     def get_name(self) -> Optional[str]:
-        return get(self.get_entity(), 'name')
+        entity = self.get_entity()
+        # Safe and much faster than importing pydash.get for shallow access
+        if entity is not None and 'name' in entity:
+            return entity['name']
+        return None
 
     def get_region(self) -> Optional[str]:
         return get(self.get_entity(), 'region')
