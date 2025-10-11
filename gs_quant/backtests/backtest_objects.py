@@ -527,7 +527,7 @@ class TransactionCostEntry:
 
 class CashPayment:
     def __init__(self, trade, effective_date=None, scale_date=None, direction=1, scaling_parameter='notional_amount',
-                 transaction_cost_entry: Optional[TransactionCostEntry] = None):
+                 transaction_cost_entry: Optional['TransactionCostEntry'] = None):
         self.trade = trade
         self.effective_date = effective_date
         self.scale_date = scale_date
@@ -537,10 +537,22 @@ class CashPayment:
         self.transaction_cost_entry = transaction_cost_entry
 
     def to_frame(self):
-        df = pd.DataFrame(self.cash_paid.items(), columns=['Cash Ccy', 'Cash Amount'])
-        df['Instrument Name'] = self.trade.name
-        df['Pricing Date'] = self.effective_date
-        return df
+        # Faster construction by using direct dict-of-lists and passing final data to pd.DataFrame once,
+        # avoiding intermediate steps and additional allocations
+        if not self.cash_paid:
+            # Handle the empty case early to prevent further work
+            return pd.DataFrame(columns=['Cash Ccy', 'Cash Amount', 'Instrument Name', 'Pricing Date'])
+
+        keys = list(self.cash_paid.keys())
+        values = list(self.cash_paid.values())
+        n = len(keys)
+        data = {
+            'Cash Ccy': keys,
+            'Cash Amount': values,
+            'Instrument Name': [self.trade.name] * n,
+            'Pricing Date': [self.effective_date] * n,
+        }
+        return pd.DataFrame(data)
 
 
 class Hedge:
