@@ -811,10 +811,15 @@ def weighted_sum(series: List[pd.Series], weights: list) -> pd.Series:
         )
     )
 
-    # reindex inputs and calculate
-    series = [s.reindex(cal) for s in series]
-    weights = [pd.Series(w, index=cal) for w in weights]
-    return sum(series[i] * weights[i] for i in range(len(series))) / sum(weights)
+    # reindex inputs and calculate using numpy vectorization
+    series_arrays = [s.reindex(cal).to_numpy() for s in series]
+    weights_array = np.asarray(weights, dtype=float).reshape(-1, 1)
+    stacked_series = np.vstack(series_arrays)
+
+    weighted_sum_array = np.sum(stacked_series * weights_array, axis=0)
+    sum_weights = np.sum(weights_array)
+
+    return pd.Series(weighted_sum_array / sum_weights, index=cal)
 
 
 @plot_function
