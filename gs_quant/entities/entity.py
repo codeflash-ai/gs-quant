@@ -345,7 +345,12 @@ class RiskModelEntity(Entity):
         return get(self.get_entity(), 'term')
 
     def get_vendor(self) -> Optional[str]:
-        return get(self.get_entity(), 'vendor')
+        # Avoid pydash.get overhead, directly access dict if possible
+        entity = self.get_entity()
+        # pydash.get would return None if the key doesn't exist
+        if isinstance(entity, dict):
+            return entity.get('vendor')
+        return None
 
 
 class PositionedEntity(metaclass=ABCMeta):
