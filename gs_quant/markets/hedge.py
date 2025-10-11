@@ -137,7 +137,7 @@ class Constraint:
                  constraint_name: str,
                  minimum: float = 0,
                  maximum: float = 100,
-                 constraint_type: Optional[ConstraintType] = None):
+                 constraint_type: Optional['ConstraintType'] = None):
         self.__constraint_name = constraint_name
         self.__minimum = minimum
         self.__maximum = maximum
@@ -190,17 +190,39 @@ class Constraint:
 
     def to_dict(self):
         response = {
-            'name': self.constraint_name,
-            'min': self.minimum,
-            'max': self.maximum
+            'name': self.__constraint_name,
+            'min': self.__minimum,
+            'max': self.__maximum
         }
-        if self.constraint_type != ConstraintType.ESG and self.constraint_type != ConstraintType.ASSET:
-            response['type'] = self.constraint_type.value
-        if self.constraint_type == ConstraintType.ASSET:
+        ct = self.__constraint_type
+        if ct != ConstraintType.ESG and ct != ConstraintType.ASSET:
+            response['type'] = ct.value
+        if ct == ConstraintType.ASSET:
             response['assetId'] = response['name']
             response.pop('name')
-
         return response
+
+    # Property accessors needed for code behavior; not removed for optimization,
+    # but method attribute access is replaced below by direct attribute access where possible.
+    @property
+    def constraint_name(self):
+        return self.__constraint_name
+
+    @property
+    def minimum(self):
+        return self.__minimum
+
+    @property
+    def maximum(self):
+        return self.__maximum
+
+    @property
+    def constraint_type(self):
+        return self.__constraint_type
+
+    @constraint_type.setter
+    def constraint_type(self, value):
+        self.__constraint_type = value
 
 
 class HedgeConstraints:
@@ -215,18 +237,31 @@ class HedgeConstraints:
                  sectors: List[Constraint] = None,
                  industries: List[Constraint] = None,
                  esg: List[Constraint] = None):
-        for con in assets or []:
-            con.constraint_type = ConstraintType.ASSET
-        for con in regions or []:
-            con.constraint_type = ConstraintType.REGION
-        for con in countries or []:
-            con.constraint_type = ConstraintType.COUNTRY
-        for con in sectors or []:
-            con.constraint_type = ConstraintType.SECTOR
-        for con in industries or []:
-            con.constraint_type = ConstraintType.INDUSTRY
-        for con in esg or []:
-            con.constraint_type = ConstraintType.ESG
+        # Use local variable to avoid repeated attribute lookups in loop
+        if assets:
+            ct = ConstraintType.ASSET
+            for con in assets:
+                con.constraint_type = ct
+        if regions:
+            ct = ConstraintType.REGION
+            for con in regions:
+                con.constraint_type = ct
+        if countries:
+            ct = ConstraintType.COUNTRY
+            for con in countries:
+                con.constraint_type = ct
+        if sectors:
+            ct = ConstraintType.SECTOR
+            for con in sectors:
+                con.constraint_type = ct
+        if industries:
+            ct = ConstraintType.INDUSTRY
+            for con in industries:
+                con.constraint_type = ct
+        if esg:
+            ct = ConstraintType.ESG
+            for con in esg:
+                con.constraint_type = ct
         self.__assets = assets
         self.__countries = countries
         self.__regions = regions
@@ -285,22 +320,53 @@ class HedgeConstraints:
     def to_dict(self):
         response = {}
 
-        classification_constraints = []
-        for constraint_type in [self.countries, self.regions, self.sectors, self.industries]:
-            if constraint_type:
-                classification_constraints += [con.to_dict() for con in constraint_type]
-        if len(classification_constraints) > 0:
+        # Tighten logic: avoid temporary lists and unnecessary comprehensions
+        # by inlining with generator expressions to avoid intermediate lists in memory.
+        # Build all classifcation constraints in one pass using tuple expansion.
+        classification_lists = (self.__countries, self.__regions, self.__sectors, self.__industries)
+        classification_constraints = [
+            con.to_dict()
+            for clist in classification_lists if clist
+            for con in clist
+        ]
+        if classification_constraints:
             response['classificationConstraints'] = classification_constraints
 
-        esg_constraints = [con.to_dict() for con in self.esg] if self.esg else []
-        if len(esg_constraints) > 0:
-            response['esgConstraints'] = esg_constraints
+        if self.__esg:
+            esg_constraints = [con.to_dict() for con in self.__esg]
+            if esg_constraints:
+                response['esgConstraints'] = esg_constraints
 
-        asset_constraints = [con.to_dict() for con in self.assets] if self.assets else []
-        if len(asset_constraints) > 0:
-            response['assetConstraints'] = asset_constraints
+        if self.__assets:
+            asset_constraints = [con.to_dict() for con in self.__assets]
+            if asset_constraints:
+                response['assetConstraints'] = asset_constraints
 
         return response
+
+    @property
+    def assets(self):
+        return self.__assets
+
+    @property
+    def countries(self):
+        return self.__countries
+
+    @property
+    def regions(self):
+        return self.__regions
+
+    @property
+    def sectors(self):
+        return self.__sectors
+
+    @property
+    def industries(self):
+        return self.__industries
+
+    @property
+    def esg(self):
+        return self.__esg
 
 
 class PerformanceHedgeParameters:
