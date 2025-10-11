@@ -749,10 +749,11 @@ class Hedge:
         :return: a Pandas DataFrame with results
         """
         results = {'Portfolio': {}, 'Hedge': {}, 'Hedged Portfolio': {}}
-        for key in self.result:
-            for inner_key in self.result[key]:
-                if isinstance(self.result[key][inner_key], float):
-                    results[key][inner_key] = self.result[key][inner_key]
+        for key, inner_dict in self.result.items():
+            results_key = results[key]
+            for inner_key, value in inner_dict.items():
+                if isinstance(value, float):
+                    results_key[inner_key] = value
         return pd.DataFrame(results)
 
     def get_backtest_performance(self) -> pd.DataFrame:
