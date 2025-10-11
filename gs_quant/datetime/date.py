@@ -244,12 +244,15 @@ def has_feb_29(start: dt.date, end: dt.date):
     >>> end = date(2020, 3, 15)
     >>> has_feb_29(start, end)
     """
-    feb_29 = False
-    for x in range(1, (end - start).days + 1):
-        date = start + dt.timedelta(days=x)
-        feb_29 = feb_29 | (date.month == 2 and date.day == 29)
+    if end <= start:
+        return False
 
-    return feb_29
+    for year in range(start.year, end.year + 1):
+        if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
+            feb_29 = dt.date(year, 2, 29)
+            if start < feb_29 <= end:
+                return True
+    return False
 
 
 def day_count_fraction(
