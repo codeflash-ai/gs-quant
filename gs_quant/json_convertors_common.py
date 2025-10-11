@@ -25,9 +25,11 @@ from gs_quant.common import RiskMeasure, ParameterisedRiskMeasure
 from gs_quant import common
 from gs_quant import risk
 
+_valid_risk_attrs = set(dir(risk))
+
 
 def gsq_rm_for_name(name: str) -> Optional[RiskMeasure]:
-    if name is None or name not in dir(risk):
+    if name is None or name not in _valid_risk_attrs:
         return None
     return getattr(risk, name)
 
@@ -44,29 +46,38 @@ def encode_risk_measure_tuple(blob: Tuple[RiskMeasure, ...]) -> Tuple[Dict, ...]
 
 
 def _decode_param(data: dict) -> Optional[RiskMeasureParameter]:
-    params = data.get('parameters', None)
-    if params is not None and isinstance(params, dict) and 'parameterType' in params:
-        cls_name = params['parameterType'] + 'Parameter'
-        parameter_cls = getattr(common, cls_name)
-        parameter = parameter_cls(**{k: v for k, v in params.items() if k != 'parameterType'})
-        return parameter
+    params = data.get('parameters')
+    if params and isinstance(params, dict):
+        cls_name = params.get('parameterType')
+        if cls_name:
+            parameter_cls = getattr(common, f"{cls_name}Parameter", None)
+            if parameter_cls:
+                # Use dictionary comprehension to skip 'parameterType'
+                parameter = parameter_cls(**{k: v for k, v in params.items() if k != 'parameterType'})
+                return parameter
     return None
 
 
 def _decode_gsq_risk_measure(data: dict) -> Optional[RiskMeasure]:
     def _enum_or_str_equal(a: Optional[Union[Enum, str]], b: Optional[Union[Enum, str]]):
-        return (a is None and b is None) or (str(a).lower() == str(b).lower())
+        # Fast-path when both are None or identical object
+        if a is b:
+            return True
+        if a is None or b is None:
+            return False
+        return str(a).lower() == str(b).lower()
 
-    name = data.get('name', None)
+    name = data.get('name')
     gsq_rm = gsq_rm_for_name(name)
     if gsq_rm is None:
         return None
-    asset_class = data.get('assetClass', None)
-    measure_type = data.get('measureType', None)
+    asset_class = data.get('assetClass')
+    measure_type = data.get('measureType')
     if _enum_or_str_equal(asset_class, gsq_rm.asset_class) and _enum_or_str_equal(measure_type, gsq_rm.measure_type):
+        # No faster alternative to copy.copy for shallow copying, this is optimal
         result = copy.copy(gsq_rm)
         param = _decode_param(data)
-        if param:
+        if param is not None:
             result.parameters = param
         return result
     return None
