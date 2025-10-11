@@ -28,8 +28,9 @@ class OrderBy(Enum):
     """
     Content ordering
     """
-    ASC = 'asc'
-    DESC = 'desc'
+
+    ASC = "asc"
+    DESC = "desc"
 
     def __str__(self):
         return str(self.value)
@@ -40,14 +41,14 @@ class GsContentApi:
 
     @classmethod
     def get_contents(
-            cls,
-            channels: set = None,
-            asset_ids: set = None,
-            author_ids: set = None,
-            tags: set = None,
-            offset: int = 0,
-            limit: int = 10,
-            order_by: dict = {'direction': OrderBy.DESC, 'field': 'createdTime'}
+        cls,
+        channels: set = None,
+        asset_ids: set = None,
+        author_ids: set = None,
+        tags: set = None,
+        offset: int = 0,
+        limit: int = 10,
+        order_by: dict = {"direction": OrderBy.DESC, "field": "createdTime"},
     ) -> List[ContentResponse]:
         """
         Get contents for given parameters
@@ -71,10 +72,10 @@ class GsContentApi:
         """
 
         if limit and limit > 1000:
-            raise ValueError('Limit is too large. Limit must be <= 1000.')
+            raise ValueError("Limit is too large. Limit must be <= 1000.")
 
         if offset and (offset < 0 or offset >= limit):
-            raise ValueError('Invalid offset. Offset must be >= 0 and < limit')
+            raise ValueError("Invalid offset. Offset must be >= 0 and < limit")
 
         parameters_dict = cls._build_parameters_dict(
             channel=channels,
@@ -83,10 +84,18 @@ class GsContentApi:
             tag=tags,
             offset=[offset] if offset else None,
             limit=[limit] if limit else None,
-            order_by=[order_by] if order_by else None)
+            order_by=[order_by] if order_by else None,
+        )
 
-        query_string = '' if not parameters_dict else cls._build_query_string(parameters_dict)
-        contents = GsSession.current._get(f'/content{query_string}', cls=GetManyContentsResponse)
+        # Short-circuit the fast case before building the query string
+        if not parameters_dict:
+            query_string = ""
+        else:
+            query_string = cls._build_query_string(parameters_dict)
+
+        contents = GsSession.current._get(
+            f"/content{query_string}", cls=GetManyContentsResponse
+        )
         return contents.data
 
     @staticmethod
@@ -118,7 +127,11 @@ class GsContentApi:
         parameters = {}
         for key, value in kwargs.items():
             if value:
-                parameters.setdefault(key, []).extend(sorted(value))
+                # Avoid sorting if value is already a list or set of length 1
+                if isinstance(value, (list, set)) and len(value) == 1:
+                    parameters.setdefault(key, []).extend(value)
+                else:
+                    parameters.setdefault(key, []).extend(sorted(value))
         return OrderedDict(parameters)
 
     @classmethod
@@ -131,24 +144,23 @@ class GsContentApi:
         In: { 'channel': ['G10', 'EM'], 'limit': 10 }
         Out: ?channel=G10&channel=EM&limit=10
         """
-        query_string = '?'
-
-        # Builds a list of tuples for easy iteration like:
-        # [('channel', 'channel-1'), ('channel', 'channel-2'), ('assetId', 'asset-1'), ...]
-        parameter_tuples = [(parameter_name, parameter_value)
-                            for parameter_name, parameter_values in parameters.items()
-                            for parameter_value in parameter_values]
-
-        for index, parameter_tuple in enumerate(parameter_tuples):
-            name, value = parameter_tuple
-            value = quote(value.encode()) if isinstance(value, str) else value
-
-            if name == 'order_by':
-                value = cls._convert_order_by(value)
-
-            query_string += f'{name}={value}' if index == 0 else f'&{name}={value}'
-
-        return query_string
+        # Instead of first expanding to all tuples and then processing,
+        # we build parts inline efficiently.
+        parts = []
+        for parameter_name, parameter_values in parameters.items():
+            for parameter_value in parameter_values:
+                value = parameter_value
+                if parameter_name == "order_by":
+                    # If order_by, must convert first *before* quoting
+                    value = cls._convert_order_by(value)
+                if isinstance(value, str):
+                    value = quote(value.encode())
+                parts.append(f"{parameter_name}={value}")
+        # If there's at least one parameter, prepend '?'
+        if parts:
+            return "?" + "&".join(parts)
+        else:
+            return ""
 
     @classmethod
     def _convert_order_by(cls, order_by: dict) -> str:
@@ -156,11 +168,11 @@ class GsContentApi:
         Converts an orderByDirection and orderByField to an acceptable query parameter format
         expected by the Content API
         """
-        direction = order_by['direction']
+        direction = order_by["direction"]
 
         if direction == OrderBy.DESC:
-            order_by_parameter = '>'
+            order_by_parameter = ">"
         else:
-            order_by_parameter = '<'
+            order_by_parameter = "<"
 
-        return order_by_parameter + order_by['field']
+        return order_by_parameter + order_by["field"]
