@@ -393,7 +393,15 @@ def log(x: pd.Series) -> pd.Series:
     :func:`exp`
 
     """
-    return np.log(x)
+    if isinstance(x, pd.Series) and not isinstance(x.dtype, pd.Int64Dtype):
+        values = x._values
+        result = np.log(values)
+        if isinstance(result, np.ndarray) and result.dtype == values.dtype:
+            return x.__class__(result, index=x.index, name=x.name)
+        else:
+            return pd.Series(result, index=x.index, name=x.name)
+    else:
+        return np.log(x)
 
 
 @plot_function
