@@ -246,7 +246,13 @@ class Country(Entity):
         return get(self.get_entity(), 'xref.alpha2')
 
     def get_country_code(self):
-        return get(self.get_entity(), 'xref.countryCode')
+        d = self.get_entity()
+        if d is None:
+            return None
+        xref = d.get('xref') if isinstance(d, dict) else None
+        if not isinstance(xref, dict):
+            return None
+        return xref.get('countryCode')
 
 
 class Subdivision(Entity):
