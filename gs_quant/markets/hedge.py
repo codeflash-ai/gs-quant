@@ -978,7 +978,8 @@ class Hedge:
         :param curr_weight: float, the weighting of the corresponding asset (of the entire portfolio) on the current day
         :return: float, the net notional amount of the asset traded on the current day
         """
-        return sum([np.abs(curr_weight - prev_weight) * notional_on_the_day])
+        # Avoid unnecessary list and sum by using abs directly. Type correctness stays the same.
+        return np.abs(curr_weight - prev_weight) * notional_on_the_day
 
     @staticmethod
     def compute_tcosts(basis_points, asset_weights, asset_notionals, backtest_dates, portfolio_asset_ids):
@@ -1004,16 +1005,29 @@ class Hedge:
         :return: pd.Series, the cumulative transaction costs associated with rebalancing the portfolio across the
                             backtest period
         """
-        tcosts_each_day = []
-        for idx, date in enumerate(backtest_dates):
-            tcost_today = 0
+        # Pre-fetch lookups for improved runtime and avoid repeated global lookups
+        compute_notional_traded = Hedge.compute_notional_traded
+        t_cost = Hedge.t_cost
+        abs_func = abs
+
+        num_dates = len(backtest_dates)
+        tcosts_each_day = np.zeros(num_dates, dtype=float)
+
+        # Array-based iteration for hotspot
+        for idx in range(num_dates):
+            tcost_today = 0.0
             for asset_id in portfolio_asset_ids:
-                prev_weights = asset_weights[asset_id][0] if idx == 0 else asset_weights[asset_id][idx - 1]
-                notional_on_the_day, curr_weights = asset_notionals[asset_id][idx], asset_weights[asset_id][idx]
-                notional_to_trade = Hedge.compute_notional_traded(notional_on_the_day, prev_weights, curr_weights)
-                transaction_cost = Hedge.t_cost(basis_points, notional_to_trade)
+                weights = asset_weights[asset_id]
+                notionals = asset_notionals[asset_id]
+                prev_weight = weights[0] if idx == 0 else weights[idx - 1]
+                curr_weight = weights[idx]
+                notional_on_the_day = notionals[idx]
+                notional_to_trade = compute_notional_traded(notional_on_the_day, prev_weight, curr_weight)
+                transaction_cost = t_cost(basis_points, notional_to_trade)
                 tcost_today += transaction_cost
-            tcosts_each_day.append(abs(tcost_today))
+            tcosts_each_day[idx] = abs_func(tcost_today)
+
+        # Use numpy's cumsum directly into pd.Series for memory and speed efficiency
         cum_tcosts = pd.Series(np.cumsum(tcosts_each_day))
         return cum_tcosts
 
