@@ -28,6 +28,8 @@ from gs_quant.datetime.gscalendar import GsCalendar
 from gs_quant.markets.securities import ExchangeCode
 from gs_quant.common import Currency
 
+_MONTH_DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
 _logger = logging.getLogger(__name__)
 
 
@@ -119,8 +121,16 @@ class dRule(RDateRule):
 
 class eRule(RDateRule):
     def handle(self) -> dt.date:
-        month_range = calendar.monthrange(self.result.year, self.result.month)
-        return self.result.replace(day=month_range[1])
+        month = self.result.month
+        if month == 2:
+            year = self.result.year
+            if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0):
+                day = 29
+            else:
+                day = 28
+        else:
+            day = _MONTH_DAYS[month]
+        return self.result.replace(day=day)
 
 
 class FRule(RDateRule):
