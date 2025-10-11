@@ -61,84 +61,91 @@ def backtest_basket(
     if len(weights) != num_assets or len(weights) != len(costs):
         raise MqValueError("series, weights, and cost lists must have the same length")
 
-    # For all inputs which are Pandas series, get the intersection of their calendars
-    cal = pd.DatetimeIndex(
-        reduce(
-            np.intersect1d,
-            (
-                curve.index
-                for curve in series + weights + costs
-                if isinstance(curve, pd.Series)
-            ),
-        )
-    )
+    # Efficient calendar intersection between series/indexes
+    all_indexes = [curve.index for curve in series if isinstance(curve, pd.Series)]
+    # weights and costs are generally list of scalars
+    cal = reduce(np.intersect1d, all_indexes)
+    cal = pd.DatetimeIndex(cal)
 
-    # Reindex inputs and convert to pandas dataframes
-    series = pd.concat([curve.reindex(cal) for curve in series], axis=1)
-    weights = pd.concat([pd.Series(w, index=cal) for w in weights], axis=1)
-    costs = pd.concat([pd.Series(c, index=cal) for c in costs], axis=1)
+    # Compose 2d array for prices, weights, costs (faster than individual concat for each)
+    # Pre-cast input series to DataFrame if needed
+    series_arr = np.column_stack([curve.reindex(cal).to_numpy() for curve in series])
+    # For weights and costs, avoid using pd.concat or pd.Series, use np.full for scalar values
+    def expand_param(param):
+        if isinstance(param[0], pd.Series):
+            # (Very rare: weight as per-period pd.Series)
+            return np.column_stack([s.reindex(cal).to_numpy() for s in param])
+        else:
+            return np.tile(param, (len(cal), 1))
+    weights_arr = expand_param(weights)
+    costs_arr = expand_param(costs)
 
-    if rebal_freq == RebalFreq.DAILY:
-        rebal_dates = cal
+    # Prepare np arrays for out, units, actual_weights
+    N, K = series_arr.shape
+    output_arr = np.empty(N, dtype=np.float64)
+    units_arr = np.empty((N, K), dtype=np.float64)
+    actual_weights_arr = np.empty((N, K), dtype=np.float64)
+
+    output_arr[0] = 100
+    # Compute initial position (vectorized)
+    units_arr[0, :] = output_arr[0] * weights_arr[0, :] / series_arr[0, :]
+    actual_weights_arr[0, :] = weights_arr[0, :]
+
+    # Compute rebal dates (Optimize via vectorized boolean mask)
+    if rebal_freq is None or rebal_freq == RebalFreq.DAILY:
+        rebal_mask = np.ones(N, dtype=bool)
     else:
         if rebal_freq == RebalFreq.WEEKLY:
-            # Get hypothetical weekly rebalances
-            num_rebals = ((cal[-1] - cal[0]).days) // 7
-            rebal_dates = [cal[0] + i * rdelta(weeks=1) for i in range(num_rebals + 1)]
+            freq = 7
+            delta = rdelta(weeks=1)
         else:
-            # Get hypothetical monthly rebalances
-            num_rebals = (cal[-1].year - cal[0].year) * 12 + cal[-1].month - cal[0].month
-            rebal_dates = [cal[0] + i * rdelta(months=1) for i in range(num_rebals + 1)]
+            freq = None  # monthly
+            delta = rdelta(months=1)
+        rebal_dates = []
+        cur = cal[0]
+        max_cal = cal[-1]
+        while cur <= max_cal:
+            # Find first calendar date >= hypothetical rebalance date
+            ix = cal.searchsorted(cur, side='left')
+            if ix < len(cal):
+                rebal_dates.append(ix)
+            if freq is not None:
+                cur += delta
+            else:
+                # month increment for relativedelta
+                cur += delta
+        rebal_mask = np.zeros(N, dtype=bool)
+        for rix in rebal_dates:
+            if rix < N:
+                rebal_mask[rix] = True
 
-        # Convert the hypothetical weekly/monthly rebalance dates to actual calendar days
-        rebal_dates = [min(cal[cal >= date]) for date in rebal_dates if date < max(cal)]
-
-    # Create Units dataframe
-    units = pd.DataFrame(index=cal, columns=series.columns)
-    actual_weights = pd.DataFrame(index=cal, columns=series.columns)
-    output = pd.Series(dtype='float64', index=cal)
-
-    # Initialize backtest
-    output.values[0] = 100
-    units.values[0, ] = (
-        output.values[0] * weights.values[0, ] / series.values[0, ]
-    )
-    actual_weights.values[0, ] = weights.values[0, ]
-
-    # Run backtest
     prev_rebal = 0
-    for i, date in enumerate(cal[1:], 1):
-        # Update performance
-        output.values[i] = output.values[i - 1] + np.dot(
-            units.values[i - 1, ], series.values[i, ] - series.values[i - 1, ]
-        )
+    for i in range(1, N):
+        # Efficient np.dot (vectorized math)
+        dS = series_arr[i, :] - series_arr[i - 1, :]
+        output_arr[i] = output_arr[i - 1] + np.dot(units_arr[i - 1, :], dS)
 
-        actual_weights.values[i, ] = (
-            weights.values[prev_rebal, ] *
-            (series.values[i, ] / series.values[prev_rebal, ]) *
-            (output.values[prev_rebal] / output.values[i])
-        )
+        rel_pr = (series_arr[i, :] / series_arr[prev_rebal, :])
+        rel_nav = (output_arr[prev_rebal] / output_arr[i])
+        actual_weights_arr[i, :] = weights_arr[prev_rebal, :] * rel_pr * rel_nav
 
-        # Rebalance on rebal_dates
-        if date in rebal_dates:
-            # Compute costs
-            output.values[i] -= (
-                np.dot(costs.values[i, ], np.abs(weights.values[i, ] - actual_weights.values[i, ])) *
-                output.values[i]
-            )
-
+        if rebal_mask[i]:
+            # Compute cost (vectorized math)
+            dw = np.abs(weights_arr[i, :] - actual_weights_arr[i, :])
+            cost = np.dot(costs_arr[i, :], dw) * output_arr[i]
+            output_arr[i] -= cost
             # Rebalance
-            units.values[i, ] = (
-                output.values[i] * weights.values[i, ] / series.values[i, ]
-            )
+            units_arr[i, :] = output_arr[i] * weights_arr[i, :] / series_arr[i, :]
             prev_rebal = i
-
-            actual_weights.values[i, ] = weights.values[i, ]
+            actual_weights_arr[i, :] = weights_arr[i, :]
         else:
-            units.values[i, ] = units.values[
-                i - 1,
-            ]
+            # No rebalance, carry previous units
+            units_arr[i, :] = units_arr[i - 1, :]
 
+    output = pd.Series(output_arr, index=cal)
+    actual_weights = pd.DataFrame(actual_weights_arr, index=cal, columns=[
+        getattr(series[idx], 'name', idx) for idx in range(K)
+    ])
     return output, actual_weights
 
 
