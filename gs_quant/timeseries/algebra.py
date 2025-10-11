@@ -423,7 +423,7 @@ def power(x: pd.Series, y: float = 1) -> pd.Series:
     :func:`sqrt`
 
     """
-    return np.power(x, y)
+    return x ** y
 
 
 @plot_function
