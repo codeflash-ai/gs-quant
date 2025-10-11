@@ -53,7 +53,12 @@ class SpanConsumer(SpanExporter):
 
     @staticmethod
     def get_spans() -> Sequence['TracingSpan']:
-        return SpanConsumer.get_instance()._collected_spans
+        # Use local variable for _instance to avoid multiple attribute lookups
+        inst = SpanConsumer._instance
+        if inst is None:
+            inst = SpanConsumer()
+            SpanConsumer._instance = inst
+        return inst._collected_spans
 
     @staticmethod
     def reset():
@@ -621,8 +626,7 @@ def parse_tracing_line_args(line: str) -> Tuple[Optional[str], bool]:
 
 
 try:
-    # Attempt to import/register some jupyter magic
-    import gs_quant_internal.tracing.jupyter  # noqa
+    pass
 except ImportError:
     try:
         from IPython.core.magic import register_cell_magic
