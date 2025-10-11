@@ -738,8 +738,14 @@ class Hedge:
         for row in constituents:
             formatted_row = {}
             for key in row:
-                formatted_row[key[0].capitalize() +
-                              ''.join(map(lambda x: x if x.islower() else f' {x}', key[1:]))] = row[key]
+                # Optimize the key formatting by avoiding lambda/map overhead
+                parts = [key[0].capitalize()]
+                for c in key[1:]:
+                    if c.islower():
+                        parts.append(c)
+                    else:
+                        parts.extend((' ', c))
+                formatted_row[''.join(parts)] = row[key]
             formatted_constituents.append(formatted_row)
         return pd.DataFrame(formatted_constituents)
 
