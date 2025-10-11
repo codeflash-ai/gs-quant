@@ -49,7 +49,7 @@ class OrderBase(metaclass=ABCMeta):
 
     def execution_price(self, data_handler: DataHandler) -> float:
         price = self._execution_price(data_handler)
-        if np.isnan(price):
+        if price != price:  # NaN check
             raise RuntimeError('can not compute the execution price')
         else:
             return price
@@ -58,7 +58,8 @@ class OrderBase(metaclass=ABCMeta):
         raise RuntimeError('The method execution_price is not implemented on OrderBase')
 
     def execution_notional(self, data_hander: DataHandler) -> float:
-        return self.execution_price(data_hander) * self.execution_quantity()
+        price = self.execution_price(data_hander)
+        return price * self.execution_quantity()
 
     def _short_name(self) -> str:
         raise RuntimeError('The method _short_name is not implemented on OrderBase')
