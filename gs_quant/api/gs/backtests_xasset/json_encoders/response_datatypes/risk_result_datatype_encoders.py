@@ -31,7 +31,14 @@ def _convert_list_to_dates(lst: list):
     if not (lst and isinstance(lst[0], str)):
         return lst
     try:
-        lst = tuple(dt.date.fromisoformat(v) for v in lst)
+        # Localize for performance
+        fromisoformat = dt.date.fromisoformat
+        # Preallocate list for performance and convert to tuple at the end
+        result = []
+        append = result.append
+        for v in lst:
+            append(fromisoformat(v))
+        lst = tuple(result)
     except ValueError:
         pass
     return lst
