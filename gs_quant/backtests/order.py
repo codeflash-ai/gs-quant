@@ -21,6 +21,8 @@ from gs_quant.backtests.data_handler import DataHandler
 import numpy as np
 import datetime as dt
 
+_CLOSE_TIME = dt.time(23, 0, 0)
+
 
 class OrderBase(metaclass=ABCMeta):
     def __init__(self,
@@ -113,7 +115,7 @@ class OrderMarketOnClose(OrderBase):
         self.execution_date = execution_date
 
     def execution_end_time(self) -> dt.datetime:
-        return dt.datetime.combine(self.execution_date, dt.time(23, 0, 0))
+        return dt.datetime.combine(self.execution_date, _CLOSE_TIME)
 
     def _execution_price(self, data_handler: DataHandler) -> float:
         if self.executed_price is None:
