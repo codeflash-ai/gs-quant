@@ -33,6 +33,8 @@ from gs_quant.entities.entity import EntityType
 from gs_quant.errors import MqValueError, MqRequestError
 from gs_quant.timeseries.measure_registry import register_measure
 
+_TENOR_REGEX = re.compile(r'([1-9]\d*)([my])')
+
 ENABLE_DISPLAY_NAME = 'GSQ_ENABLE_MEASURE_DISPLAY_NAME'
 USE_DISPLAY_NAME = os.environ.get(ENABLE_DISPLAY_NAME) == "1"
 _logger = logging.getLogger(__name__)
@@ -87,10 +89,11 @@ def _to_offset(tenor: str) -> pd.DateOffset:
 
 
 def _tenor_to_month(relative_date: str) -> int:
-    matcher = re.fullmatch('([1-9]\\d*)([my])', relative_date)
+    matcher = _TENOR_REGEX.fullmatch(relative_date)
     if matcher:
-        mag = int(matcher.group(1))
-        return mag if matcher.group(2) == 'm' else mag * 12
+        mag_str, unit = matcher.groups()
+        mag = int(mag_str)
+        return mag if unit == 'm' else mag * 12
     raise MqValueError('invalid input: relative date must be in months or years')
 
 
