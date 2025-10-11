@@ -19,7 +19,7 @@ from typing import Optional, Union
 import numpy as np
 import pandas as pd
 import datetime as dt
-from functools import partial, reduce
+from functools import partial
 from numbers import Real
 
 from dateutil.relativedelta import relativedelta as rdelta
@@ -61,85 +61,130 @@ def backtest_basket(
     if len(weights) != num_assets or len(weights) != len(costs):
         raise MqValueError("series, weights, and cost lists must have the same length")
 
-    # For all inputs which are Pandas series, get the intersection of their calendars
-    cal = pd.DatetimeIndex(
-        reduce(
-            np.intersect1d,
-            (
-                curve.index
-                for curve in series + weights + costs
-                if isinstance(curve, pd.Series)
-            ),
-        )
-    )
+    # Efficient intersection for calendars
+    def _calendar_from_series_list(series_list):
+        idxs = [curve.index for curve in series_list if isinstance(curve, pd.Series)]
+        if not idxs:
+            return pd.DatetimeIndex([])
+        # Numpy's intersect1d performs best when sets are sorted smallest-first
+        idxs.sort(key=len)
+        result = idxs[0]
+        for idx in idxs[1:]:
+            # Use intersection in sorted index fashion
+            result = result.intersection(idx)
+            if result.empty:
+                break
+        return result
 
-    # Reindex inputs and convert to pandas dataframes
-    series = pd.concat([curve.reindex(cal) for curve in series], axis=1)
-    weights = pd.concat([pd.Series(w, index=cal) for w in weights], axis=1)
-    costs = pd.concat([pd.Series(c, index=cal) for c in costs], axis=1)
+    cal = _calendar_from_series_list(series + weights + costs)
 
-    if rebal_freq == RebalFreq.DAILY:
-        rebal_dates = cal
+    # Use numpy arrays for DataFrame value creation; avoid looped reindex and concat overhead
+    # Prepare series in shape (len(cal), num_assets)
+    def _to_2d_values(obj_list, default=None):
+        vals = np.empty((len(cal), len(obj_list)), dtype=np.float64)
+        for j, x in enumerate(obj_list):
+            if isinstance(x, pd.Series):
+                arr = x.reindex(cal).values
+            else:
+                arr = np.empty(len(cal), dtype=np.float64)
+                arr.fill(x if default is None else default)
+            vals[:, j] = arr
+        return vals
+
+    series_matrix = _to_2d_values(series)
+    weights_matrix = _to_2d_values(weights)
+    costs_matrix = _to_2d_values(costs)
+
+    # Build column names (Pandas concat only used for colnames, index given directly)
+    colnames = []
+    for j, x in enumerate(series):
+        try:
+            colnames.append(x.name if hasattr(x, 'name') else str(j))
+        except Exception:
+            colnames.append(str(j))
+
+    # These are pandas DataFrame/Series using preallocated numpy arrays for performance
+    series_df = pd.DataFrame(series_matrix, index=cal, columns=colnames)
+    weights_df = pd.DataFrame(weights_matrix, index=cal, columns=colnames)
+    costs_df = pd.DataFrame(costs_matrix, index=cal, columns=colnames)
+
+    # Efficient rebalance date calculations with array logic
+    if rebal_freq == getattr(rebal_freq, 'DAILY', None):
+        rebal_date_mask = np.ones(len(cal), dtype=bool)
+        rebal_idx = np.arange(len(cal))
     else:
-        if rebal_freq == RebalFreq.WEEKLY:
-            # Get hypothetical weekly rebalances
-            num_rebals = ((cal[-1] - cal[0]).days) // 7
-            rebal_dates = [cal[0] + i * rdelta(weeks=1) for i in range(num_rebals + 1)]
+        if rebal_freq == getattr(rebal_freq, 'WEEKLY', None):
+            # Weekly rebals: every 7 days from cal[0], snapped to closest calendar date >= anchor
+            anchor = cal[0]
+            last = cal[-1]
+            num_rebals = ((last - anchor).days) // 7
+            candidates = [anchor + i * rdelta(weeks=1) for i in range(num_rebals + 1)]
         else:
-            # Get hypothetical monthly rebalances
-            num_rebals = (cal[-1].year - cal[0].year) * 12 + cal[-1].month - cal[0].month
-            rebal_dates = [cal[0] + i * rdelta(months=1) for i in range(num_rebals + 1)]
+            # Monthly rebals: every month from cal[0], snapped to closest calendar date >= anchor
+            anchor = cal[0]
+            last = cal[-1]
+            num_rebals = (last.year - anchor.year) * 12 + last.month - anchor.month
+            candidates = [anchor + i * rdelta(months=1) for i in range(num_rebals + 1)]
+        # Snap each candidate to actual trading day in cal (if exists, and within cal range)
+        cal_array = cal.values
+        idxs = np.searchsorted(cal_array, np.array(candidates, dtype='datetime64[ns]'))
+        # Only those rebal where rebalance anchor is inside our calendar
+        mask = (idxs < len(cal_array))
+        rebals_idx_set = set(idxs[mask])
+        rebal_date_mask = np.zeros(len(cal), dtype=bool)
+        for idx in rebals_idx_set:
+            rebal_date_mask[idx] = True
+        rebal_idx = np.where(rebal_date_mask)[0]
 
-        # Convert the hypothetical weekly/monthly rebalance dates to actual calendar days
-        rebal_dates = [min(cal[cal >= date]) for date in rebal_dates if date < max(cal)]
+    # Pre-allocate numpy for perf (this avoids millions of attribute lookups)
+    n = len(cal)
+    m = len(colnames)
+    output = np.empty(n, dtype=np.float64)
+    output[0] = 100.0
 
-    # Create Units dataframe
-    units = pd.DataFrame(index=cal, columns=series.columns)
-    actual_weights = pd.DataFrame(index=cal, columns=series.columns)
-    output = pd.Series(dtype='float64', index=cal)
+    # For units and actual_weights, preallocate and fill first row
+    units = np.empty((n, m), dtype=np.float64)
+    units[0, :] = output[0] * weights_matrix[0, :] / series_matrix[0, :]
+    actual_weights = np.empty((n, m), dtype=np.float64)
+    actual_weights[0, :] = weights_matrix[0, :]
 
-    # Initialize backtest
-    output.values[0] = 100
-    units.values[0, ] = (
-        output.values[0] * weights.values[0, ] / series.values[0, ]
-    )
-    actual_weights.values[0, ] = weights.values[0, ]
+    # For rebalance lookup, use set for fast "in"
+    is_rebal_idx = np.zeros(n, dtype=bool)
+    is_rebal_idx[rebal_idx] = True
 
-    # Run backtest
     prev_rebal = 0
-    for i, date in enumerate(cal[1:], 1):
-        # Update performance
-        output.values[i] = output.values[i - 1] + np.dot(
-            units.values[i - 1, ], series.values[i, ] - series.values[i - 1, ]
+    for i in range(1, n):
+        # Efficient vectorized update of output
+        output[i] = output[i - 1] + np.dot(
+            units[i - 1, :], series_matrix[i, :] - series_matrix[i - 1, :]
         )
 
-        actual_weights.values[i, ] = (
-            weights.values[prev_rebal, ] *
-            (series.values[i, ] / series.values[prev_rebal, ]) *
-            (output.values[prev_rebal] / output.values[i])
+        # Vectorized calculate actual weights
+        actual_weights[i, :] = (
+            weights_matrix[prev_rebal, :]
+            * (series_matrix[i, :] / series_matrix[prev_rebal, :])
+            * (output[prev_rebal] / output[i])
         )
 
-        # Rebalance on rebal_dates
-        if date in rebal_dates:
-            # Compute costs
-            output.values[i] -= (
-                np.dot(costs.values[i, ], np.abs(weights.values[i, ] - actual_weights.values[i, ])) *
-                output.values[i]
-            )
+        if is_rebal_idx[i]:
+            # Calculate transaction cost
+            cost = np.dot(
+                costs_matrix[i, :],
+                np.abs(weights_matrix[i, :] - actual_weights[i, :])
+            ) * output[i]
+            output[i] -= cost
 
             # Rebalance
-            units.values[i, ] = (
-                output.values[i] * weights.values[i, ] / series.values[i, ]
-            )
+            units[i, :] = output[i] * weights_matrix[i, :] / series_matrix[i, :]
             prev_rebal = i
-
-            actual_weights.values[i, ] = weights.values[i, ]
+            actual_weights[i, :] = weights_matrix[i, :]
         else:
-            units.values[i, ] = units.values[
-                i - 1,
-            ]
+            units[i, :] = units[i - 1, :]
 
-    return output, actual_weights
+    out_series = pd.Series(output, index=cal, dtype='float64')
+    # Use pd.DataFrame from numpy arrays for very fast creation
+    actual_weights_df = pd.DataFrame(actual_weights, index=cal, columns=colnames)
+    return out_series, actual_weights_df
 
 
 @plot_function
