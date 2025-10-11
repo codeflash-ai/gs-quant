@@ -33,6 +33,16 @@ from gs_quant.entities.entity import EntityType
 from gs_quant.errors import MqValueError, MqRequestError
 from gs_quant.timeseries.measure_registry import register_measure
 
+_TENOR_PATTERN = re.compile(r'(\d+)([hdwmy])')
+
+_UNIT_TO_NAME = {
+    'h': 'hours',
+    'd': 'days', 
+    'w': 'weeks',
+    'm': 'months',
+    'y': 'years'
+}
+
 ENABLE_DISPLAY_NAME = 'GSQ_ENABLE_MEASURE_DISPLAY_NAME'
 USE_DISPLAY_NAME = os.environ.get(ENABLE_DISPLAY_NAME) == "1"
 _logger = logging.getLogger(__name__)
@@ -64,24 +74,12 @@ def _create_int_enum(name, mappings):
 
 
 def _to_offset(tenor: str) -> pd.DateOffset:
-    import re
-    matcher = re.fullmatch('(\\d+)([hdwmy])', tenor)
+    matcher = _TENOR_PATTERN.fullmatch(tenor)
     if not matcher:
         raise MqValueError('invalid tenor ' + tenor)
 
     ab = matcher.group(2)
-    if ab == 'h':
-        name = 'hours'
-    elif ab == 'd':
-        name = 'days'
-    elif ab == 'w':
-        name = 'weeks'
-    elif ab == 'm':
-        name = 'months'
-    else:
-        assert ab == 'y'
-        name = 'years'
-
+    name = _UNIT_TO_NAME[ab]
     kwarg = {name: int(matcher.group(1))}
     return pd.DateOffset(**kwarg)
 
@@ -169,17 +167,21 @@ def normalize_window(x: Union[pd.Series, pd.DataFrame], window: Union[Window, in
     if isinstance(window, int):
         window = Window(window, window)
     elif isinstance(window, str):
-        window = Window(_to_offset(window), _to_offset(window))
+        offset = _to_offset(window)
+        window = Window(offset, offset)
     else:
         if window is None:
             window = Window(default_window, 0)
         else:
-            if isinstance(window.w, str):
-                window = Window(_to_offset(window.w), window.r)
-            if isinstance(window.r, str):
-                window = Window(window.w, _to_offset(window.r))
-            if window.w is None:
-                window = Window(default_window, window.r)
+            w = window.w
+            r = window.r
+            if isinstance(w, str):
+                w = _to_offset(w)
+            if isinstance(r, str):
+                r = _to_offset(r)
+            if w is None:
+                w = default_window
+            window = Window(w, r)
 
     _check_window(default_window, window)
     return window
