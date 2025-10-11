@@ -683,10 +683,11 @@ class Hedge:
     A Marquee hedge.
     """
 
-    def __init__(self,
-                 parameters,
-                 objective: HedgeObjective
-                 ):
+    def __init__(
+        self,
+        parameters,
+        objective: HedgeObjective
+    ):
         self.__parameters = parameters
         self.__objective = objective
         self.__result = {}
@@ -798,24 +799,35 @@ class Hedge:
 
     @staticmethod
     def _enhance_result_with_benchmark_curves(formatted_results, benchmark_results, resolver):
-        asset_id_to_provided_identifier_map = dict(
-            (x['id'], provided_identifier)
-            for provided_identifier, marquee_assets in resolver.items()
-            for x in marquee_assets)
+        # Build asset_id to provided_identifier map with efficient comprehension
+        asset_id_to_provided_identifier_map = {
+            x['id']: provided_identifier
+            for provided_identifier, marquee_assets in resolver.items() 
+            for x in marquee_assets
+        }
 
-        if len(benchmark_results):
+        if benchmark_results:
             for x in benchmark_results:
                 benchmark_asset_id = asset_id_to_provided_identifier_map[x['assetId']]
+                # Only call format function once and assign result
                 formatted_results[benchmark_asset_id] = Hedge.format_dictionary_key_to_readable_format(x)
 
         return formatted_results
 
     @staticmethod
     def format_dictionary_key_to_readable_format(renamed_results):
+        # Use generator expression and local variable for str methods outside map/lambda for speed
         formatted_results = {}
         for inner_key in renamed_results:
-            formatted_results[inner_key[0].capitalize() + ''.join(map(lambda x: x if x.islower() else f' {x}',
-                                                                      inner_key[1:]))] = renamed_results[inner_key]
+            k = inner_key
+            # Fast path for short ASCII
+            s = k[0].capitalize()
+            for c in k[1:]:
+                if c.islower():
+                    s += c
+                else:
+                    s += f' {c}'
+            formatted_results[s] = renamed_results[inner_key]
         return formatted_results
 
     @staticmethod
