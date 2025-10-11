@@ -137,7 +137,7 @@ class Constraint:
                  constraint_name: str,
                  minimum: float = 0,
                  maximum: float = 100,
-                 constraint_type: Optional[ConstraintType] = None):
+                 constraint_type: Optional['ConstraintType'] = None):
         self.__constraint_name = constraint_name
         self.__minimum = minimum
         self.__maximum = maximum
@@ -189,18 +189,41 @@ class Constraint:
                           maximum=as_dict.get('max'))
 
     def to_dict(self):
-        response = {
-            'name': self.constraint_name,
-            'min': self.minimum,
-            'max': self.maximum
-        }
-        if self.constraint_type != ConstraintType.ESG and self.constraint_type != ConstraintType.ASSET:
-            response['type'] = self.constraint_type.value
-        if self.constraint_type == ConstraintType.ASSET:
-            response['assetId'] = response['name']
-            response.pop('name')
+        ct = self.__constraint_type  # access once for efficiency
+        # Save all attribute lookups to local vars
+        response = {}
+        name = self.__constraint_name
+        min_ = self.__minimum
+        max_ = self.__maximum
+
+        if ct == ConstraintType.ASSET:
+            response['assetId'] = name
+            response['min'] = min_
+            response['max'] = max_
+        else:
+            response['name'] = name
+            response['min'] = min_
+            response['max'] = max_
+            if ct != ConstraintType.ESG and ct != ConstraintType.ASSET:
+                response['type'] = ct.value
 
         return response
+
+    @property
+    def constraint_name(self) -> str:
+        return self.__constraint_name
+
+    @property
+    def minimum(self) -> float:
+        return self.__minimum
+
+    @property
+    def maximum(self) -> float:
+        return self.__maximum
+
+    @property
+    def constraint_type(self):
+        return self.__constraint_type
 
 
 class HedgeConstraints:
