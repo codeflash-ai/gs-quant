@@ -33,6 +33,10 @@ from gs_quant.entities.entity import EntityType
 from gs_quant.errors import MqValueError, MqRequestError
 from gs_quant.timeseries.measure_registry import register_measure
 
+_TENOR_RE = re.compile(r'(\d+)([hdwmy])')
+
+_TENOR_UNIT_MAP = {'h': 'hours', 'd': 'days', 'w': 'weeks', 'm': 'months', 'y': 'years'}
+
 ENABLE_DISPLAY_NAME = 'GSQ_ENABLE_MEASURE_DISPLAY_NAME'
 USE_DISPLAY_NAME = os.environ.get(ENABLE_DISPLAY_NAME) == "1"
 _logger = logging.getLogger(__name__)
@@ -64,23 +68,12 @@ def _create_int_enum(name, mappings):
 
 
 def _to_offset(tenor: str) -> pd.DateOffset:
-    import re
-    matcher = re.fullmatch('(\\d+)([hdwmy])', tenor)
+    matcher = _TENOR_RE.fullmatch(tenor)
     if not matcher:
         raise MqValueError('invalid tenor ' + tenor)
 
     ab = matcher.group(2)
-    if ab == 'h':
-        name = 'hours'
-    elif ab == 'd':
-        name = 'days'
-    elif ab == 'w':
-        name = 'weeks'
-    elif ab == 'm':
-        name = 'months'
-    else:
-        assert ab == 'y'
-        name = 'years'
+    name = _TENOR_UNIT_MAP[ab]
 
     kwarg = {name: int(matcher.group(1))}
     return pd.DateOffset(**kwarg)
