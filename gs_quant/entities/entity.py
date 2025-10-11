@@ -106,10 +106,10 @@ class Entity(metaclass=ABCMeta):
 
     def __init__(self,
                  id_: str,
-                 entity_type: EntityType,
+                 entity_type: 'EntityType',
                  entity: Optional[Dict] = None):
         self.__id: str = id_
-        self.__entity_type: EntityType = entity_type
+        self.__entity_type: 'EntityType' = entity_type
         self.__entity: Dict = entity
 
     @property
@@ -151,16 +151,27 @@ class Entity(metaclass=ABCMeta):
     def _get_entity_from_type(cls,
                               entity: Dict,
                               entity_type: EntityType = None):
+        # Optimize lookups by avoiding repeated equality checks, building map once
         id_ = entity.get('id')
-        entity_type = entity_type or cls.entity_type()
-        if entity_type == EntityType.COUNTRY:
-            return Country(id_, entity=entity)
-        if entity_type == EntityType.KPI:
-            return KPI(id_, entity=entity)
-        if entity_type == EntityType.SUBDIVISION:
-            return Subdivision(id_, entity=entity)
-        if entity_type == EntityType.RISK_MODEL:
-            return RiskModelEntity(id_, entity=entity)
+        etype = entity_type if entity_type is not None else cls.entity_type()
+
+        # Build a static map only once per class for entity_type -> class constructor
+        # This reduces the number of chained comparisons on every call
+        try:
+            entity_map = cls._entity_type_map
+        except AttributeError:
+            entity_map = {
+                EntityType.COUNTRY: Country,
+                EntityType.KPI: KPI,
+                EntityType.SUBDIVISION: Subdivision,
+                EntityType.RISK_MODEL: RiskModelEntity,
+            }
+            cls._entity_type_map = entity_map
+
+        constructor = entity_map.get(etype)
+        if constructor is not None:
+            return constructor(id_, entity=entity)
+        # If no match, do nothing (original: implicit return None)
 
     def get_marquee_id(self) -> str:
         return self.__id
