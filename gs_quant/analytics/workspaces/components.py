@@ -148,7 +148,7 @@ class Component(ABC):
                  id_: Optional[str] = None,
                  *,
                  width: int = None,
-                 selections: List[Selection] = None,
+                 selections: List['Selection'] = None,
                  container_ids: List[str] = None):
         self.__id = id_ or f'{self.__class__.__name__}-{str(uuid.uuid4())[0:5]}'
         self._height = height
@@ -206,10 +206,13 @@ class Component(ABC):
                 'height': self._height or 200
             }
         }
+
+        # Use direct assignment for containerIds, avoiding unnecessary list construction
+        # (very likely self.__container_ids is already a list of str due to __init__)
         if self.__selections:
             dict_['selections'] = [selection.as_dict() for selection in self.__selections]
         if self.__container_ids:
-            dict_['containerIds'] = [containerId for containerId in self.__container_ids]
+            dict_['containerIds'] = self.__container_ids
 
         return dict_
 
@@ -469,17 +472,23 @@ class SelectorComponent(Component):
         dict_ = super().as_dict()
         dict_['parameters']['containerIds'] = self.container_ids
 
-        if self.default_option_index:
-            dict_['parameters']['defaultOptionIndex'] = self.default_option_index
+        default_option_index = self.default_option_index
+        title = self.title
+        tooltip = self.tooltip
+        parent_selector_id = self.parent_selector_id
 
-        if self.title:
-            dict_['parameters']['title'] = self.title
+        # Use local variable lookups (faster than attribute lookup in tight loops)
+        if default_option_index:
+            dict_['parameters']['defaultOptionIndex'] = default_option_index
 
-        if self.tooltip:
-            dict_['parameters']['tooltip'] = self.tooltip
+        if title:
+            dict_['parameters']['title'] = title
 
-        if self.parent_selector_id:
-            dict_['parameters']['parentSelectorId'] = self.parent_selector_id
+        if tooltip:
+            dict_['parameters']['tooltip'] = tooltip
+
+        if parent_selector_id:
+            dict_['parameters']['parentSelectorId'] = parent_selector_id
 
         return dict_
 
