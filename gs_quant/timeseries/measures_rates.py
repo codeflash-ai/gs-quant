@@ -37,6 +37,10 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_RELDATE_TENOR_PATTERN = re.compile(r'(\d+)([bdwmy])')
+
+_SPECIFIC_TENOR_PATTERN = re.compile(r'(imm[1-4]|frb[1-9]|ecb[1-9])')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -458,10 +462,10 @@ def _get_tdapi_rates_assets(allow_many=False, **kwargs) -> Union[str, list]:
 def _check_forward_tenor(forward_tenor) -> GENERIC_DATE:
     if isinstance(forward_tenor, dt.date):
         return forward_tenor
-    elif forward_tenor in ['Spot', 'spot', 'SPOT']:
+    elif forward_tenor in ('Spot', 'spot', 'SPOT'):
         return '0b'
     elif not (_is_valid_relative_date_tenor(forward_tenor) or
-              re.fullmatch('(imm[1-4]|frb[1-9]|ecb[1-9])', forward_tenor)):
+              _SPECIFIC_TENOR_PATTERN.fullmatch(forward_tenor)):
         raise MqValueError('invalid forward tenor ' + forward_tenor)
     else:
         return forward_tenor
@@ -1120,10 +1124,7 @@ def _check_strike_reference(strike_reference):
 def _is_valid_relative_date_tenor(tenor):
     if tenor is None:
         return True
-    if re.fullmatch('(\\d+)([bdwmy])', tenor):
-        return True
-    else:
-        return False
+    return _RELDATE_TENOR_PATTERN.fullmatch(tenor) is not None
 
 
 @plot_measure((AssetClass.Cash,), (AssetType.Currency,),
