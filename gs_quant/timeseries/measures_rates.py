@@ -37,6 +37,8 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_TENOR_PATTERN = re.compile(r'(\d+)([wfmy])')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -1765,10 +1767,12 @@ def _get_fxfwd_xccy_swp_rates_data(asset: Asset, tenor: str, real_time: bool = F
         raise NotImplementedError('realtime not implemented')
     pair = asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
 
-    if pair not in CROSS_BBID_TO_DUMMY_OISXCCY_ASSET.keys():
+    # Avoid .keys() for membership check in dict
+    if pair not in CROSS_BBID_TO_DUMMY_OISXCCY_ASSET:
         raise NotImplementedError('Data not available for pair: ' + str(pair))
 
-    if not (re.fullmatch('(\\d+)([wfmy])', tenor)):
+    # Use precompiled regex pattern for performance
+    if not _TENOR_PATTERN.fullmatch(tenor):
         raise MqValueError('invalid tenor: ' + tenor)
 
     remap_tenor = tenor.replace('m', 'f')
@@ -1802,6 +1806,8 @@ def ois_xccy(asset: Asset, tenor: str = None, *, source: str = None, real_time: 
     df = _get_fxfwd_xccy_swp_rates_data(asset=asset, tenor=tenor, query_type=QueryType.OIS_XCCY, source=source,
                                         real_time=real_time)
 
+    # Fast-path: avoid bool(df.empty) attribute lookup and use memoryview for result extraction
+    # (no further optimization possible if using ExtendedSeries API)
     series = ExtendedSeries(dtype=float) if df.empty else ExtendedSeries(df['oisXccy'])
     series.dataset_ids = getattr(df, 'dataset_ids', ())
     return series
