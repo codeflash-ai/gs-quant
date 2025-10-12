@@ -554,14 +554,33 @@ def subtract_risk(left: DataFrameWithInfo, right: DataFrameWithInfo) -> pd.DataF
 
 
 def sort_values(data: Iterable, columns: Tuple[str, ...], by: Tuple[str, ...]) -> Iterable:
-    indices = tuple(columns.index(c) for c in by if c in columns)
-    fns: List[Optional[Callable[[any], Optional[float]]]] = [None] * len(columns)
-    for idx in indices:
-        fns[idx] = __column_sort_fns.get(columns[idx])
+    # Precompute the indices and the corresponding transformation functions
+    indices = []
+    fns: List[Optional[Callable[[any], Optional[float]]]] = []
+    for c in by:
+        if c in columns:
+            idx = columns.index(c)
+            indices.append(idx)
+            fns.append(__column_sort_fns.get(columns[idx]))
+    indices = tuple(indices)
+    fns = tuple(fns)
 
-    def cmp(row) -> tuple:
-        return tuple((fns[i](row[i]) or 0) if fns[i] else row[i] for i in indices)
+    # Hoist cmp to use precomputed indices and functions, and locally bind variables for speed
+    def cmp(row):
+        # Use direct for-loop and list comprehension for slight speedup
+        result = []
+        for i, fn in zip(indices, fns):
+            val = row[i]
+            if fn:
+                transformed = fn(val)
+                result.append(transformed if transformed is not None else 0)
+            else:
+                result.append(val)
+        return tuple(result)
 
+    # Materialize data into list only once if it's not a list (to avoid multiple iteration cost)
+    if not isinstance(data, list):
+        data = list(data)
     return sorted(data, key=cmp)
 
 
