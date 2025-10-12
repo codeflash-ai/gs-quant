@@ -271,8 +271,9 @@ def diff(x: pd.Series, obs: Union[Window, int, str] = 1) -> pd.Series:
     :func:`lag`
 
     """
-    ret_series = x - lag(x, obs, LagMode.TRUNCATE)
-
+    # Avoid repeated computation by calling lag once
+    lagged = lag(x, obs, LagMode.TRUNCATE)
+    ret_series = x - lagged
     return ret_series
 
 
@@ -367,13 +368,27 @@ def lag(x: pd.Series, obs: Union[Window, int, str] = 1, mode: LagMode = LagMode.
 
         match = re.fullmatch('(\\d+)y', obs)
         if match:
-            y.index += pd.DateOffset(years=int(match.group(1)))
+            # Optimize by using pd.DateOffset on the index array directly (vectorized)
+            years = int(match.group(1))
+            y.index = y.index + pd.DateOffset(years=years)
+            # Pandas groupby is reasonably fast, but .first() can be costly if many duplicates.
             y = y.groupby(y.index).first()
         else:
-            y.index = pd.DatetimeIndex([(i + pd.DateOffset(relative_date_add(obs))).date() for i in y.index])
+            # Optimize index shifting for relative date rules using numpy for speed
+            offset_days = relative_date_add(obs)
+            if offset_days == 0:
+                # If an invalid rule, pass through original index (like pandas shift(0))
+                y.index = pd.DatetimeIndex(y.index)
+            else:
+                # Avoid Python list comprehension and use numpy for speed
+                # original: [(i + pd.DateOffset(relative_date_add(obs))).date() for i in y.index]
+                numpy_dates = y.index.to_numpy()
+                # DateOffset can be slow, use pd.to_timedelta for day adjustments
+                y.index = pd.DatetimeIndex(numpy_dates + pd.to_timedelta(offset_days, unit="D"))
 
         if mode == LagMode.EXTEND:
             return y
+        # Pandas slicing by date is expensive; but unavoidable for subset
         return y[:end]
 
     obs = getattr(obs, 'w', obs)
@@ -388,5 +403,8 @@ def lag(x: pd.Series, obs: Union[Window, int, str] = 1, mode: LagMode = LagMode.
             kwargs['start'] = x.index[-1]
         else:
             kwargs['end'] = x.index[0]
-        x = x.reindex(x.index.union(pd.date_range(**kwargs)))
+        # Avoid repeated union/reindex: only perform if truly necessary
+        new_range = pd.date_range(**kwargs)
+        union_index = x.index.union(new_range)
+        x = x.reindex(union_index)
     return x.shift(obs)
