@@ -29,51 +29,53 @@ from gs_quant.errors import MqRequestError
 from gs_quant.target.risk_models import RiskModelData, RiskModelType as Type
 from gs_quant.target.risk_models import RiskModelDataMeasure as Measure
 
+# Move mapping to module-level constant for efficiency
+_MEASURE_TO_FIELD: dict[Measure, str] = {
+    Measure.Specific_Risk: 'specificRisk',
+    Measure.Total_Risk: 'totalRisk',
+    Measure.Historical_Beta: 'historicalBeta',
+    Measure.Predicted_Beta: 'predictedBeta',
+    Measure.Global_Predicted_Beta: 'globalPredictedBeta',
+    Measure.Daily_Return: 'dailyReturn',
+    Measure.Specific_Return: 'specificReturn',
+    Measure.Estimation_Universe_Weight: 'estimationUniverseWeight',
+    Measure.R_Squared: 'rSquared',
+    Measure.Fair_Value_Gap_Standard_Deviation: 'fairValueGapStandardDeviation',
+    Measure.Fair_Value_Gap_Percent: 'fairValueGapPercent',
+    Measure.Universe_Factor_Exposure: 'factorExposure',
+    Measure.Factor_Return: 'factorReturn',
+    Measure.Factor_Standard_Deviation: 'factorStandardDeviation',
+    Measure.Factor_Z_Score: 'factorZScore',
+    Measure.Bid_Ask_Spread: 'bidAskSpread',
+    Measure.Bid_Ask_Spread_30d: 'bidAskSpread30d',
+    Measure.Bid_Ask_Spread_60d: 'bidAskSpread60d',
+    Measure.Bid_Ask_Spread_90d: 'bidAskSpread90d',
+    Measure.Trading_Volume: 'tradingVolume',
+    Measure.Trading_Volume_30d: 'tradingVolume30d',
+    Measure.Trading_Volume_60d: 'tradingVolume60d',
+    Measure.Trading_Volume_90d: 'tradingVolume90d',
+    Measure.Traded_Value_30d: 'tradedValue30d',
+    Measure.Composite_Volume: 'compositeVolume',
+    Measure.Composite_Volume_30d: 'compositeVolume30d',
+    Measure.Composite_Volume_60d: 'compositeVolume60d',
+    Measure.Composite_Volume_90d: 'compositeVolume90d',
+    Measure.Composite_Value_30d: 'compositeValue30d',
+    Measure.Issuer_Market_Cap: 'issuerMarketCap',
+    Measure.Capitalization: 'capitalization',
+    Measure.Currency: 'currency',
+    Measure.Dividend_Yield: 'dividendYield',
+    Measure.Price: 'price',
+    Measure.Unadjusted_Specific_Risk: 'unadjustedSpecificRisk',
+    Measure.Model_Price: 'modelPrice',
+    Measure.Factor_Mean: 'factorMean',
+    Measure.Factor_Cross_Sectional_Mean: 'factorCrossSectionalMean',
+    Measure.Factor_Cross_Sectional_Standard_Deviation: 'factorCrossSectionalStandardDeviation',
+}
+
 
 def _map_measure_to_field_name(measure: Measure):
-    measure_to_field = {
-        Measure.Specific_Risk: 'specificRisk',
-        Measure.Total_Risk: 'totalRisk',
-        Measure.Historical_Beta: 'historicalBeta',
-        Measure.Predicted_Beta: 'predictedBeta',
-        Measure.Global_Predicted_Beta: 'globalPredictedBeta',
-        Measure.Daily_Return: 'dailyReturn',
-        Measure.Specific_Return: 'specificReturn',
-        Measure.Estimation_Universe_Weight: 'estimationUniverseWeight',
-        Measure.R_Squared: 'rSquared',
-        Measure.Fair_Value_Gap_Standard_Deviation: 'fairValueGapStandardDeviation',
-        Measure.Fair_Value_Gap_Percent: 'fairValueGapPercent',
-        Measure.Universe_Factor_Exposure: 'factorExposure',
-        Measure.Factor_Return: 'factorReturn',
-        Measure.Factor_Standard_Deviation: 'factorStandardDeviation',
-        Measure.Factor_Z_Score: 'factorZScore',
-        Measure.Bid_Ask_Spread: 'bidAskSpread',
-        Measure.Bid_Ask_Spread_30d: 'bidAskSpread30d',
-        Measure.Bid_Ask_Spread_60d: 'bidAskSpread60d',
-        Measure.Bid_Ask_Spread_90d: 'bidAskSpread90d',
-        Measure.Trading_Volume: 'tradingVolume',
-        Measure.Trading_Volume_30d: 'tradingVolume30d',
-        Measure.Trading_Volume_60d: 'tradingVolume60d',
-        Measure.Trading_Volume_90d: 'tradingVolume90d',
-        Measure.Traded_Value_30d: 'tradedValue30d',
-        Measure.Composite_Volume: 'compositeVolume',
-        Measure.Composite_Volume_30d: 'compositeVolume30d',
-        Measure.Composite_Volume_60d: 'compositeVolume60d',
-        Measure.Composite_Volume_90d: 'compositeVolume90d',
-        Measure.Composite_Value_30d: 'compositeValue30d',
-        Measure.Issuer_Market_Cap: 'issuerMarketCap',
-        Measure.Capitalization: 'capitalization',
-        Measure.Currency: 'currency',
-        Measure.Dividend_Yield: 'dividendYield',
-        Measure.Price: 'price',
-        Measure.Unadjusted_Specific_Risk: 'unadjustedSpecificRisk',
-        Measure.Model_Price: 'modelPrice',
-        Measure.Factor_Mean: 'factorMean',
-        Measure.Factor_Cross_Sectional_Mean: 'factorCrossSectionalMean',
-        Measure.Factor_Cross_Sectional_Standard_Deviation: 'factorCrossSectionalStandardDeviation',
-    }
-
-    return measure_to_field.get(measure, '')
+    # Use pre-constructed dict for much faster lookups
+    return _MEASURE_TO_FIELD.get(measure, '')
 
 
 def build_factor_id_to_name_map(results: List) -> dict:
