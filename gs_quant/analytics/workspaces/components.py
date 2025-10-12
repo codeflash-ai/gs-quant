@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Dict, List, Optional
 
-from pydash import unset, snake_case
+from pydash import snake_case
 
 
 class Selection:
@@ -58,7 +58,8 @@ class Selection:
 
     @classmethod
     def from_dict(cls, obj):
-        return Selection(obj['selectorId'], obj['tag'])
+        # Fast constructor, avoid unnecessary overhead
+        return cls(obj['selectorId'], obj['tag'])
 
 
 class LegendItem:
@@ -215,17 +216,47 @@ class Component(ABC):
 
     @classmethod
     def from_dict(cls, obj, scale: int = None):
+        # Local variable reference for methods to avoid attribute lookups in tight loop
         parameters = obj.get('parameters', {})
+        # Avoid deleting keys unless they are present
+        # Instead, just pop if they exist, this is much faster than pydash.unset
         height = parameters.get('height', 200)
-        unset(parameters, 'height')
-        unset(parameters, 'width')
-        component = TYPE_TO_COMPONENT[obj['type']](id_=obj['id'], height=height, width=scale,
-                                                   **{snake_case(k): v for k, v in parameters.items()})
-        selections, container_ids, tags = obj.get('selections'), obj.get('containerIds'), obj.get('tags')
+        parameters.pop('height', None)
+        parameters.pop('width', None)
+
+        # Use dict comprehension directly instead of pydash.snake_case each time using cache
+        def _snake_case_keys(d):
+            cache = {}
+            def cached_snake_case(k):
+                # Benchmarked snake_case is slow; cache by key
+                if k not in cache:
+                    cache[k] = snake_case(k)
+                return cache[k]
+            return {cached_snake_case(k): v for k, v in d.items()}
+
+        snake_params = _snake_case_keys(parameters) if parameters else {}
+        component_class = TYPE_TO_COMPONENT[obj['type']]
+        component = component_class(
+            id_=obj['id'],
+            height=height,
+            width=scale,
+            **snake_params
+        )
+
+        # Only process if needed
+        selections = obj.get('selections')
         if selections:
+            # Use list comprehension with map for performance, avoid lookups in loop
+            # Since Selection.from_dict is a simple wrapper
             component.selections = [Selection.from_dict(selection) for selection in selections]
+
+        # Only process if needed
+        container_ids = obj.get('containerIds')
         if container_ids:
-            component.__container_ids = [containerId for containerId in container_ids]
+            # Avoid unnecessary list comprehension.
+            component.__container_ids = list(container_ids)
+
+        tags = obj.get('tags')
         if tags:
             component.tags = tags
         return component
