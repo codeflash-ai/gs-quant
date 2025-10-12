@@ -98,22 +98,28 @@ def excess_returns(price_series: pd.Series, benchmark_or_rate: Union[Asset, Curr
 def _annualized_return(levels: pd.Series, rolling: Union[int, pd.DateOffset],
                        interpolation_method: Interpolate = Interpolate.NAN) -> pd.Series:
     if isinstance(rolling, pd.DateOffset):
-        starting = [tstamp - rolling for tstamp in levels.index]
-        levels = interpolate(levels, method=interpolation_method)
-        points = list(
-            map(lambda d, v, i: pow(v / levels.get(i, np.nan),
-                                    365.25 / (d - i).days) - 1,
-                levels.index[1:],
-                levels.values[1:], starting[1:]))
+        # Vectorized datetime subtraction for efficiency
+        starting = levels.index - rolling
+        levels_interp = interpolate(levels, method=interpolation_method)
+        idx = levels.index[1:]
+        vals = levels.values[1:]
+        starts = starting[1:]
+        points = [
+            pow(v / levels_interp.get(i, np.nan), 365.25 / (d - i).days) - 1
+            for d, v, i in zip(idx, vals, starts)
+        ]
     else:
         if interpolation_method is not Interpolate.NAN:
             raise MqValueError(f'If w is not a relative date, method must be nan. You specified method: '
                                f'{interpolation_method.value}.')
-        starting = [0] * rolling
-        starting.extend([a for a in range(1, len(levels) - rolling + 1)])
-        points = list(
-            map(lambda d, v, i: pow(v / levels.iloc[i], 365.25 / (d - levels.index[i]).days) - 1, levels.index[1:],
-                levels.values[1:], starting[1:]))
+        starting = [0] * rolling + list(range(1, len(levels) - rolling + 1))
+        idx = levels.index[1:]
+        vals = levels.values[1:]
+        starts = starting[1:]
+        points = [
+            pow(v / levels.iloc[i], 365.25 / (d - levels.index[i]).days) - 1
+            for d, v, i in zip(idx, vals, starts)
+        ]
     points.insert(0, 0)
     return pd.Series(points, index=levels.index)
 
