@@ -37,6 +37,8 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_RELATIVE_DATE_TENOR_PATTERN = re.compile(r'(\d+)([bdwmy])')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -1120,10 +1122,8 @@ def _check_strike_reference(strike_reference):
 def _is_valid_relative_date_tenor(tenor):
     if tenor is None:
         return True
-    if re.fullmatch('(\\d+)([bdwmy])', tenor):
-        return True
-    else:
-        return False
+    # Use pre-compiled pattern and avoid unnecessary else branch
+    return _RELATIVE_DATE_TENOR_PATTERN.fullmatch(tenor) is not None
 
 
 @plot_measure((AssetClass.Cash,), (AssetType.Currency,),
