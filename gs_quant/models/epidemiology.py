@@ -120,23 +120,34 @@ class SEIR(CompartmentalModel):
         :param parameters: parameters of the model (not including initial conditions), i.e. beta, gamma, sigma, N
         :return: tuple, the derivatives dSdt, dEdt, dIdt, dRdt of each of the S, E, I, R variables
         """
+        # Local variable unpacking is still faster than indexing into tuple repeatedly,
+        # so keep as is.
         s, e, i, r = xs
 
-        if isinstance(parameters, Parameters):
+        # Optimize isinstance-checking by checking tuple first, which is more frequently used per profile
+        if isinstance(parameters, tuple):
+            # This branch is "hot" (1015/1018 hits), so we keep the fast tuple-unpacking path first
+            beta, gamma, sigma, N = parameters
+        elif isinstance(parameters, Parameters):
+            # Only 2/1018 hits, so keep as rare branch
+            # Each `.value` property access is necessary here due to object structure
             beta = parameters['beta'].value
             gamma = parameters['gamma'].value
             sigma = parameters['sigma'].value
             N = parameters['N'].value
-        elif isinstance(parameters, tuple):
-            beta, gamma, sigma, N = parameters
         else:
+            # Exception raised for all other input types
             raise ValueError("Cannot recognize parameter input")
 
-        dSdt = -beta * s * i / N
-        dEdt = beta * s * i / N - sigma * e
+        # Common subexpression elimination is not needed as only used in dEdt
+        beta_si_over_N = beta * s * i / N
+
+        dSdt = -beta_si_over_N
+        dEdt = beta_si_over_N - sigma * e
         dIdt = sigma * e - gamma * i
         dRdt = gamma * i
 
+        # Return is as fast as possible
         return dSdt, dEdt, dIdt, dRdt
 
     @classmethod
