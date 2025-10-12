@@ -144,7 +144,11 @@ def first(x: pd.Series) -> pd.Series:
     :func:`last`
 
     """
-    return pd.Series(x.iloc[0], x.index)
+    # Optimize: pass index directly to pd.Series constructor to avoid copying, 
+    # use .values for faster scalar extraction if indexer is not a slice
+    # pd.Series constructor is already fast, but avoid creating the Series when unnecessary.
+    first_val = x._values[0]
+    return pd.Series(first_val, index=x.index)
 
 
 @plot_function
