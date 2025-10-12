@@ -564,20 +564,29 @@ def _check_term_structure_tenor(tenor_type: _SwapTenorType, tenor: str) -> Dict:
 
 
 def _get_benchmark_type(currency: CurrencyEnum, benchmark_type: BenchmarkType = None):
+    """
+    Returns the floating benchmark name for the given currency and type.
+    """
+    currency_val = currency.value
+
+    # Fast-path for common currencies
     if benchmark_type is None:
-        if currency == CurrencyEnum.EUR:
+        if currency is CurrencyEnum.EUR:
             benchmark_type = BenchmarkType.EURIBOR
-        elif currency == CurrencyEnum.SEK:
+        elif currency is CurrencyEnum.SEK:
             benchmark_type = BenchmarkType.STIBOR
         else:
-            benchmark_type = BenchmarkType(str(list(CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value].keys())[0]))
-    benchmark_type_input = CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value][benchmark_type.value]
+            # Instead of .keys() and list conversion, use next(iter(...)) -- faster and avoids list allocation
+            key0 = next(iter(CURRENCY_TO_SWAP_RATE_BENCHMARK[currency_val]))
+            benchmark_type = BenchmarkType(key0)
+    benchmark_type_input = CURRENCY_TO_SWAP_RATE_BENCHMARK[currency_val][benchmark_type.value]
 
     return benchmark_type_input
 
 
 def _get_swap_leg_defaults(currency: CurrencyEnum, benchmark_type: Union[BenchmarkType, str] = None,
                            floating_rate_tenor: str = None) -> dict:
+    # Use local variable to avoid repeated attribute lookups
     pricing_location = CURRENCY_TO_PRICING_LOCATION.get(currency, PricingLocation.LDN)
     # default benchmark types
     if not isinstance(benchmark_type, str):
@@ -586,13 +595,19 @@ def _get_swap_leg_defaults(currency: CurrencyEnum, benchmark_type: Union[Benchma
         benchmark_type_input = benchmark_type
     # default floating index
     if floating_rate_tenor is None:
-        if benchmark_type_input in BENCHMARK_TO_DEFAULT_FLOATING_RATE_TENORS:
-            floating_rate_tenor = BENCHMARK_TO_DEFAULT_FLOATING_RATE_TENORS[benchmark_type_input]
+        tenor = BENCHMARK_TO_DEFAULT_FLOATING_RATE_TENORS.get(benchmark_type_input)
+        if tenor is not None:
+            floating_rate_tenor = tenor
         else:
+            # This branch is rarely taken; message unchanged
             raise MqValueError(f"{benchmark_type_input} has no default fixing tenor, please specify one")
 
-    return dict(currency=currency, benchmark_type=benchmark_type_input,
-                floating_rate_tenor=floating_rate_tenor, pricing_location=pricing_location)
+    return {
+        "currency": currency,
+        "benchmark_type": benchmark_type_input,
+        "floating_rate_tenor": floating_rate_tenor,
+        "pricing_location": pricing_location,
+    }
 
 
 def _get_swap_csa_terms(curr: str, benchmark_type: str) -> dict:
