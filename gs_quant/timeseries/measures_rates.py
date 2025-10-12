@@ -37,6 +37,14 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_RELATIVE_DATE_TENOR_PATTERN = re.compile(r'(\d+)([bdwmy])')
+
+_SWAP_TENOR_PATTERN = _RELATIVE_DATE_TENOR_PATTERN
+
+_FRB_TENOR_PATTERN = re.compile(r'(frb[1-9])')
+
+_IMM_FRB_ECB_TENOR_PATTERN = re.compile(r'(imm[1-4]|frb[1-9]|ecb[1-9])')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -460,8 +468,10 @@ def _check_forward_tenor(forward_tenor) -> GENERIC_DATE:
         return forward_tenor
     elif forward_tenor in ['Spot', 'spot', 'SPOT']:
         return '0b'
-    elif not (_is_valid_relative_date_tenor(forward_tenor) or
-              re.fullmatch('(imm[1-4]|frb[1-9]|ecb[1-9])', forward_tenor)):
+    # Use pre-compiled pattern and avoid calling _is_valid_relative_date_tenor twice
+    is_rel_tenor = _is_valid_relative_date_tenor(forward_tenor)
+    is_imm_frb_ecb = bool(_IMM_FRB_ECB_TENOR_PATTERN.fullmatch(forward_tenor))
+    if not (is_rel_tenor or is_imm_frb_ecb):
         raise MqValueError('invalid forward tenor ' + forward_tenor)
     else:
         return forward_tenor
@@ -551,13 +561,17 @@ def _check_tenor_type(tenor_type: _SwapTenorType) -> _SwapTenorType:
 
 
 def _check_term_structure_tenor(tenor_type: _SwapTenorType, tenor: str) -> Dict:
+    # Hot paths: avoid regex if not needed; use precompiled patterns; minimize calls
     if tenor_type == _SwapTenorType.FORWARD_TENOR:
         tenor = _check_forward_tenor(tenor)
         tenor_to_plot = 'terminationTenor'
         tenor_dataset_field = 'asset_parameters_effective_date'
-    elif not re.fullmatch('(\\d+)([bdwmy])', tenor) or re.fullmatch('(frb[1-9])', tenor):
-        raise MqValueError('invalid swap tenor ' + tenor)
     else:
+        # One regex match, then another only if first fails (compare to original OR order)
+        match = _SWAP_TENOR_PATTERN.fullmatch(tenor)
+        frb_match = _FRB_TENOR_PATTERN.fullmatch(tenor) if not match else False
+        if not match or frb_match:
+            raise MqValueError('invalid swap tenor ' + tenor)
         tenor_to_plot = 'effectiveTenor'
         tenor_dataset_field = 'asset_parameters_termination_date'
     return dict(tenor=tenor, tenor_to_plot=tenor_to_plot, tenor_dataset_field=tenor_dataset_field)
