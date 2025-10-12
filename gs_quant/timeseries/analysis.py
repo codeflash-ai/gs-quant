@@ -26,6 +26,8 @@ from . import align
 from .helper import plot_function, Window, Interpolate
 from ..errors import MqValueError
 
+_year_obs_pattern = re.compile(r'(\d+)y')
+
 """
 Timeseries analysis library contains functions used to analyze properties of timeseries, including laging, differencing,
 autocorrelation, co-integration and other operations
@@ -365,28 +367,30 @@ def lag(x: pd.Series, obs: Union[Window, int, str] = 1, mode: LagMode = LagMode.
         end = x.index[-1]
         y = x.copy()  # avoid mutating the provided series
 
-        match = re.fullmatch('(\\d+)y', obs)
+        match = _year_obs_pattern.fullmatch(obs)
         if match:
-            y.index += pd.DateOffset(years=int(match.group(1)))
+            years = int(match.group(1))
+            y.index = y.index + pd.DateOffset(years=years)
             y = y.groupby(y.index).first()
         else:
-            y.index = pd.DatetimeIndex([(i + pd.DateOffset(relative_date_add(obs))).date() for i in y.index])
+            offset_days = relative_date_add(obs)
+            y.index = y.index + pd.DateOffset(days=offset_days)
 
         if mode == LagMode.EXTEND:
             return y
         return y[:end]
 
-    obs = getattr(obs, 'w', obs)
-    # Determine how we want to handle observations prior to start date
+    obs_val = getattr(obs, 'w', obs)
     if mode == LagMode.EXTEND:
         if x.empty:
             return x
-        if x.index.resolution != 'day':
-            raise MqValueError(f'unable to extend index with resolution {x.index.resolution}')
-        kwargs = {'periods': abs(obs) + 1, 'freq': 'D'}
-        if obs > 0:
+        index_resolution = x.index.resolution
+        if index_resolution != 'day':
+            raise MqValueError(f'unable to extend index with resolution {index_resolution}')
+        kwargs = {'periods': abs(obs_val) + 1, 'freq': 'D'}
+        if obs_val > 0:
             kwargs['start'] = x.index[-1]
         else:
             kwargs['end'] = x.index[0]
         x = x.reindex(x.index.union(pd.date_range(**kwargs)))
-    return x.shift(obs)
+    return x.shift(obs_val)
