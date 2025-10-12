@@ -793,13 +793,36 @@ def max_drawdown(x: pd.Series, w: Union[Window, int, str] = Window(None, 0)) -> 
     w = normalize_window(x, w)
     if isinstance(w.w, pd.DateOffset):
         if pd.api.types.is_datetime64_dtype(x.index):
-            scores = pd.Series([x[idx] / x.loc[(x.index > (idx - w.w)) & (x.index <= idx)].max() - 1
-                                for idx in x.index], index=x.index)
-            result = pd.Series([scores.loc[(scores.index > (idx - w.w)) & (scores.index <= idx)].min()
-                                for idx in scores.index], index=scores.index)
+            x_index = x.index
+            x_values = x.values
+            # Precompute series for max and min more efficiently
+            max_map = {}
+            for idx in x_index:
+                # mask for past window using np searchsorted for efficiency could be used if sorted, but
+                # must keep the same behavior as original AND Not all indexes guaranteed to be sorted monotonically
+                mask = (x_index > (idx - w.w)) & (x_index <= idx)
+                max_map[idx] = x[mask].max()
+
+            # Vectorized - Create scores
+            scores = pd.Series(
+                [x[idx] / max_map[idx] - 1 for idx in x_index],
+                index=x_index
+            )
+            # result: for each t, find the min of scores in rolling window
+            min_map = {}
+            for idx in x_index:
+                mask = (x_index > (idx - w.w)) & (x_index <= idx)
+                min_map[idx] = scores[mask].min()
+            result = pd.Series(
+                [min_map[idx] for idx in x_index], index=x_index
+            )
         else:
             raise TypeError('Please pass in list of dates as index')
     else:
+        # Vectorized use of pandas rolling
         rolling_max = x.rolling(w.w, 0).max()
-        result = (x / rolling_max - 1).rolling(w.w, 0).min()
+        denom = rolling_max.to_numpy()
+        numer = x.to_numpy()
+        ratio = numer / denom - 1
+        result = pd.Series(ratio, index=x.index).rolling(w.w, 0).min()
     return apply_ramp(result, w)
