@@ -62,6 +62,7 @@ class Selection:
 
 
 class LegendItem:
+
     def __init__(self,
                  color: str,
                  icon: str,
@@ -91,7 +92,7 @@ class LegendItem:
 
     @classmethod
     def from_dict(cls, obj):
-        return LegendItem(color=obj['color'], icon=obj['icon'], name=obj['name'], tooltip=obj.get('tooltip'))
+        return cls(obj['color'], obj['icon'], obj['name'], obj.get('tooltip'))
 
 
 class RelatedLinkType(Enum):
