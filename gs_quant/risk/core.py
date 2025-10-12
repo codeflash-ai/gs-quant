@@ -592,9 +592,32 @@ def combine_risk_key(key_1: RiskKey, key_2: RiskKey) -> RiskKey:
     :type key_1: RiskKey
     :type key_2: RiskKey
     """
+    # Access all attributes only once
+    k1_provider = key_1.provider
+    k2_provider = key_2.provider
+    k1_date = key_1.date
+    k2_date = key_2.date
+    k1_market = key_1.market
+    k2_market = key_2.market
+    k1_params = key_1.params
+    k2_params = key_2.params
+    k1_scenario = key_1.scenario
+    k2_scenario = key_2.scenario
+    k1_risk_measure = key_1.risk_measure
+    k2_risk_measure = key_2.risk_measure
 
-    def get_field_value(field_name: str):
-        return getattr(key_1, field_name) if getattr(key_1, field_name) == getattr(key_2, field_name) else None
+    provider = k1_provider if k1_provider == k2_provider else None
+    date = k1_date if k1_date == k2_date else None
+    market = k1_market if k1_market == k2_market else None
+    params = k1_params if k1_params == k2_params else None
+    scenario = k1_scenario if k1_scenario == k2_scenario else None
+    risk_measure = k1_risk_measure if k1_risk_measure == k2_risk_measure else None
 
-    return RiskKey(get_field_value("provider"), get_field_value("date"), get_field_value("market"),
-                   get_field_value("params"), get_field_value("scenario"), get_field_value("risk_measure"))
+    return RiskKey(
+        provider,
+        date,
+        market,
+        params,
+        scenario,
+        risk_measure
+    )
