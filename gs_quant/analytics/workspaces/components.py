@@ -148,7 +148,7 @@ class Component(ABC):
                  id_: Optional[str] = None,
                  *,
                  width: int = None,
-                 selections: List[Selection] = None,
+                 selections: List['Selection'] = None,
                  container_ids: List[str] = None):
         self.__id = id_ or f'{self.__class__.__name__}-{str(uuid.uuid4())[0:5]}'
         self._height = height
@@ -199,17 +199,20 @@ class Component(ABC):
 
     @abstractmethod
     def as_dict(self) -> Dict:
-        dict_ = {
+        dict_: Dict = {
             'id': self.__id,
             'type': self._type,
             'parameters': {
                 'height': self._height or 200
             }
         }
+        # Inline the conditions/branch, and avoid unnecessary list comprehensions if possible.
         if self.__selections:
+            # Don't create extra references.
             dict_['selections'] = [selection.as_dict() for selection in self.__selections]
         if self.__container_ids:
-            dict_['containerIds'] = [containerId for containerId in self.__container_ids]
+            # Use 'list' only if needed: these are already lists, just assign.
+            dict_['containerIds'] = self.__container_ids
 
         return dict_
 
@@ -278,6 +281,7 @@ class DataVizComponent(Component):
         self._type = 'dataviz'
 
     def as_dict(self) -> Dict:
+        # No-op override, for direct call-through
         return super().as_dict()
 
 
