@@ -62,6 +62,7 @@ class Selection:
 
 
 class LegendItem:
+
     def __init__(self,
                  color: str,
                  icon: str,
@@ -91,7 +92,8 @@ class LegendItem:
 
     @classmethod
     def from_dict(cls, obj):
-        return LegendItem(color=obj['color'], icon=obj['icon'], name=obj['name'], tooltip=obj.get('tooltip'))
+        # Fast path attribute initialization avoiding unnecessary copies
+        return cls(obj['color'], obj['icon'], obj['name'], obj.get('tooltip'))
 
 
 class RelatedLinkType(Enum):
@@ -628,11 +630,22 @@ class LegendComponent(Component):
     @classmethod
     def from_dict(cls, obj: Dict, scale: int = None):
         parameters = obj.get('parameters', {})
-        items = [LegendItem.from_dict(item) for item in parameters.get('items', [])]
+        items_param = parameters.get('items')
+        if items_param:
+            # Avoid repeated .get with default empty list, slightly faster for non-empty case
+            items = [LegendItem.from_dict(item) for item in items_param]
+        else:
+            items = []
 
-        return LegendComponent(id_=obj['id'], height=parameters.get('height', 200), width=scale,
-                               selections=obj.get('selections'), position=parameters.get('position'),
-                               transparent=parameters.get('transparent'), items=items)
+        return cls(
+            id_=obj['id'],
+            height=parameters.get('height', 200),
+            width=scale,
+            selections=obj.get('selections'),
+            position=parameters.get('position'),
+            transparent=parameters.get('transparent'),
+            items=items
+        )
 
 
 class MonitorComponent(Component):
