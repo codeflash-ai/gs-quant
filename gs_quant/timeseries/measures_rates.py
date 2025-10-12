@@ -37,6 +37,8 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_STRIKE_REF_PATTERN = re.compile(r"ATM|ATM[-+]?([0-9]*\.[0-9]+|[0-9]+)")
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -1098,7 +1100,7 @@ def _swaption_build_asset_query(currency, benchmark_type=None, effective_date=No
 def _check_strike_reference(strike_reference):
     if strike_reference is None:
         return None
-    if isinstance(strike_reference, float) or isinstance(strike_reference, int):
+    if isinstance(strike_reference, (float, int)):
         if strike_reference == 0:
             strike_reference = "ATM"
         else:
@@ -1111,8 +1113,9 @@ def _check_strike_reference(strike_reference):
     else:
         to_check = [strike_reference]
 
+    match = _STRIKE_REF_PATTERN.fullmatch
     for s in to_check:
-        if not re.fullmatch(r"ATM|ATM[-+]?([0-9]*\.[0-9]+|[0-9]+)", s):
+        if not match(s):
             raise MqValueError('invalid strike reference ' + s)
     return strike_reference
 
