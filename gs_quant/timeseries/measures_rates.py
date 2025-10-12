@@ -37,6 +37,10 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_CCY_TENOR_PATTERNS = {}
+
+_CCY_FWD_TENOR_PATTERNS = {}
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -1880,18 +1884,24 @@ def get_cb_swaps_kwargs(currency: CurrencyEnum, benchmark_type: BenchmarkTypeCB)
     benchmark_type = _check_benchmark_type(currency, benchmark_type)
     clearing_house = _check_clearing_house(None)
     defaults = _get_swap_leg_defaults(currency, benchmark_type)
-    possible_swap_tenors = [f"{CCY_TO_CB[currency.value]}{i}" for i in range(0, 20)]
-    possible_fwd_tenors = [f"{CCY_TO_CB[currency.value]}{i}" for i in range(0, 20)]
-    possible_fwd_tenors.append('0b')
+
+    # Use local variable and list concatenation for efficient list creation (instead of two comprehensions)
+    base_str = CCY_TO_CB[currency.value]
+    possible_swap_tenors = [f"{base_str}{i}" for i in range(20)]
+    possible_fwd_tenors = possible_swap_tenors + ['0b']
+
     fixed_rate = 'ATM'
-    kwargs = dict(asset_class='Rates', type='Swap',
-                  asset_parameters_floating_rate_option=defaults['benchmark_type'],
-                  asset_parameters_fixed_rate=fixed_rate,
-                  asset_parameters_clearing_house=clearing_house.value,
-                  # asset_parameters_floating_rate_designated_maturity=defaults['floating_rate_tenor'],
-                  asset_parameters_termination_date=possible_swap_tenors,
-                  asset_parameters_effective_date=possible_fwd_tenors,
-                  asset_parameters_notional_currency=currency.value)
+    kwargs = dict(
+        asset_class='Rates',
+        type='Swap',
+        asset_parameters_floating_rate_option=defaults['benchmark_type'],
+        asset_parameters_fixed_rate=fixed_rate,
+        asset_parameters_clearing_house=clearing_house.value,
+        # asset_parameters_floating_rate_designated_maturity=defaults['floating_rate_tenor'],
+        asset_parameters_termination_date=possible_swap_tenors,
+        asset_parameters_effective_date=possible_fwd_tenors,
+        asset_parameters_notional_currency=currency.value
+    )
     return kwargs
 
 
@@ -1903,9 +1913,12 @@ def get_cb_meeting_swaps(currency: CurrencyEnum, benchmark_type: BenchmarkTypeCB
 def get_cb_meeting_swap(currency: CurrencyEnum, benchmark_type: BenchmarkTypeCB, forward_tenor: str,
                         swap_tenor: str) -> str:
     kwargs = get_cb_swaps_kwargs(currency=currency, benchmark_type=benchmark_type)
-    if not (re.fullmatch(f"({CCY_TO_CB[currency.value]}[0-9]|1[0-9])", swap_tenor) or
-            re.fullmatch(f"({CCY_TO_CB[currency.value]}[0-9]|1[0-9]|0b)", forward_tenor)):
+
+    pat, fwd_pat = _get_ccy_regex_patterns(currency.value)
+    # Use precompiled regex
+    if not (pat.fullmatch(swap_tenor) or fwd_pat.fullmatch(forward_tenor)):
         raise MqValueError('invalid swap tenor ' + swap_tenor)
+
     kwargs['asset_parameters_termination_date'] = swap_tenor
     kwargs['asset_parameters_effective_date'] = forward_tenor
     return _get_tdapi_rates_assets(**kwargs)
@@ -2214,3 +2227,16 @@ def policy_rate_term_structure_rt(asset: Asset, event_type: EventType = EventTyp
     if series.empty:  # Raise descriptive error if no data returned + date context is in the past
         check_forward_looking(None, source, 'policy_rate_term_structure')
     return series
+
+def _get_ccy_regex_patterns(currency_value):
+    pat = _CCY_TENOR_PATTERNS.get(currency_value)
+    fwd_pat = _CCY_FWD_TENOR_PATTERNS.get(currency_value)
+    if pat is None:
+        ccy_prefix = CCY_TO_CB[currency_value]
+        # Covers "EX0", ..., "EX9", and "EX10" ... "EX19"
+        pat = re.compile(rf"{ccy_prefix}[0-9]|1[0-9]")
+        # Covers "EX0", ..., "EX9", "EX10" ..."EX19", and "0b"
+        fwd_pat = re.compile(rf"{ccy_prefix}[0-9]|1[0-9]|0b")
+        _CCY_TENOR_PATTERNS[currency_value] = pat
+        _CCY_FWD_TENOR_PATTERNS[currency_value] = fwd_pat
+    return pat, fwd_pat
