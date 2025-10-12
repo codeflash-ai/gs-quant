@@ -35,6 +35,8 @@ from gs_quant.markets.portfolio import Portfolio
 from gs_quant.risk.transform import Transformer
 from gs_quant.target.backtests import BacktestTradingQuantityType
 
+_constant_transaction_model_zero = ConstantTransactionModel(0)
+
 action_count = 1
 
 
@@ -42,7 +44,7 @@ Duration = Union[str, dt.date, dt.timedelta, CustomDuration]
 
 
 def default_transaction_cost():
-    return ConstantTransactionModel(0)
+    return _constant_transaction_model_zero
 
 
 class ScalingActionType(Enum):
