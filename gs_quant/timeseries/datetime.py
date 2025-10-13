@@ -53,11 +53,16 @@ def __interpolate_step(x: pd.Series, dates: pd.Series = None) -> pd.Series:
 
     curve = x.align(dates, 'right', )[0]  # only need values from dates
 
-    for knot in curve.items():
-        if np.isnan(knot[1]):
-            curve[knot[0]] = current
-        else:
-            current = knot[1]
+    values = curve.values
+    isnan = np.isnan(values)
+    if values.size > 0:
+        last_val = current
+        for i in range(len(values)):
+            if isnan[i]:
+                values[i] = last_val
+            else:
+                last_val = values[i]
+        curve.values[:] = values
     return curve
 
 
@@ -188,14 +193,14 @@ def interpolate(x: pd.Series, dates: Union[List[dt.date], List[dt.time], pd.Seri
     if isinstance(dates, pd.Series):
         align_series = dates
     else:
-        align_series = pd.Series(np.nan, dates)
+        align_series = pd.Series(np.nan, index=pd.Index(dates))
 
     if method == Interpolate.INTERSECT:
         return x.align(align_series, 'inner')[0]
     if method == Interpolate.NAN:
         return x.align(align_series, 'right')[0]
     if method == Interpolate.ZERO:
-        align_series = pd.Series(0.0, dates)
+        align_series = pd.Series(0.0, index=pd.Index(dates))
         return x.align(align_series, 'right', fill_value=0)[0]
     if method == Interpolate.STEP:
         return __interpolate_step(x, align_series)
