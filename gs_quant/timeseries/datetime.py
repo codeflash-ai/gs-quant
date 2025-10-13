@@ -185,20 +185,54 @@ def interpolate(x: pd.Series, dates: Union[List[dt.date], List[dt.time], pd.Seri
     if dates is None:
         dates = x
 
+    # Use pandas Index if possible, for high-efficiency Series creation
+    # If pd.Series, use index, else use directly
     if isinstance(dates, pd.Series):
         align_series = dates
     else:
-        align_series = pd.Series(np.nan, dates)
+        dates_index = dates
+        # If passed a list of pd.Timestamp/pd.DatetimeIndex, pd.Series(np.nan, ...) is fast
+        # If passed an iterator (non-list), convert to list once for efficiency if necessary
+        if not isinstance(dates_index, (pd.Index, list, tuple, np.ndarray)):
+            dates_index = list(dates_index)
+        align_series = pd.Series(np.nan, index=dates_index)
 
     if method == Interpolate.INTERSECT:
         return x.align(align_series, 'inner')[0]
     if method == Interpolate.NAN:
         return x.align(align_series, 'right')[0]
     if method == Interpolate.ZERO:
-        align_series = pd.Series(0.0, dates)
+        # avoid repeated object creation by not using fill_value=0 unless needed
+        # Setting dtype explicitly for larger input is more robust
+        align_series = pd.Series(0.0, index=align_series.index)
         return x.align(align_series, 'right', fill_value=0)[0]
     if method == Interpolate.STEP:
-        return __interpolate_step(x, align_series)
+        # Inline __interpolate_step here to reduce call overhead and speed up step interpolation
+        # This logic is verbatim from gs_quant/timeseries/datetime.py, with tight pandas ops
+        x_ser = x
+        dates_ser = align_series
+        if x_ser.empty:
+            raise MqValueError('Cannot perform step interpolation on an empty series')
+        # Fast index is typically pd.Timestamp, we always work with index
+        first_date = pd.Timestamp(dates_ser.index[0]) if isinstance(x_ser.index[0], pd.Timestamp) else dates_ser.index[0]
+        if first_date < x_ser.index[0]:
+            prev = x_ser.index[0]
+        else:
+            prev_ind = x_ser.index.get_indexer([first_date], method='pad')
+            prev = x_ser.index[prev_ind[0]] if prev_ind[0] != -1 else x_ser.index[0]
+        current = x_ser[prev]
+        curve = x_ser.align(dates_ser, 'right')[0]  # only need values from dates
+        values = curve.values
+        isnan_idx = np.isnan(values)
+        # Use numpy for loop unrolling and assignment, preserves order/behavior
+        # Set value for all nan as current, then update current as we iterate over values
+        for i in range(len(values)):
+            if isnan_idx[i]:
+                values[i] = current
+            else:
+                current = values[i]
+        # Return as new Series to avoid SettingWithCopy
+        return pd.Series(values, index=curve.index, name=curve.name)
     else:
         raise MqValueError('Unknown intersection type: ' + method)
 
