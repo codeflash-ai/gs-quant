@@ -400,36 +400,45 @@ class SecmasterXrefFormatter:
         active_identifiers = {}  # type -> record mapping
         current_period_start = None
 
+        len_events = len(events)
         i = 0
-        while i < len(events):
-            current_date = events[i].date
-            current_date_events = []
 
-            # Collect all events for the current date
-            while i < len(events) and events[i].date == current_date:
-                current_date_events.append(events[i])
-                i += 1
+        # Precompute event types for quick comparisons
+        EventType_START = SecmasterXrefFormatter.EventType.START
+        EventType_END = SecmasterXrefFormatter.EventType.END
+
+        while i < len_events:
+            current_event = events[i]
+            current_date = current_event.date
+            start_events = []
+            end_events = []
+
+            # Collect all events for the current date and categorize
+            j = i
+            while j < len_events and events[j].date == current_date:
+                event = events[j]
+                # Branchless classification for slight speedup
+                event_type = event.event_type
+                if event_type is EventType_END:
+                    end_events.append(event)
+                elif event_type is EventType_START:
+                    start_events.append(event)
+                j += 1
 
             # Close current period if we have active identifiers
             if active_identifiers and current_period_start is not None:
                 period_end = SecmasterXrefFormatter._subtract_one_day(current_date)
+                # Inline dict comp for identifiers, avoids one extra inner loop var creation
                 periods.append({
                     "startDate": current_period_start,
                     "endDate": period_end,
-                    "identifiers": {record['type']: record['value']
-                                    for record in active_identifiers.values()}
+                    "identifiers": {r['type']: r['value'] for r in active_identifiers.values()}
                 })
-
-            # Process all events for this date
-            # First process END events, then START events
-            end_events = [e for e in current_date_events if e.event_type == SecmasterXrefFormatter.EventType.END]
-            start_events = [e for e in current_date_events if e.event_type == SecmasterXrefFormatter.EventType.START]
 
             # Remove ending identifiers
             for event in end_events:
                 identifier_type = event.record['type']
-                if identifier_type in active_identifiers:
-                    del active_identifiers[identifier_type]
+                active_identifiers.pop(identifier_type, None)
 
             # Add starting identifiers
             for event in start_events:
@@ -440,26 +449,30 @@ class SecmasterXrefFormatter:
             if active_identifiers:
                 current_period_start = current_date
 
+            i = j  # Move to next index offset
+
         # Handle final period extending to infinity or latest end date
         if active_identifiers and current_period_start is not None:
             # Check if any active identifier has infinity end date
-            has_infinity = any(
-                record['endDate'] == SecmasterXrefFormatter.INFINITY_DATE
-                for record in active_identifiers.values()
-            )
+            infinity_date = SecmasterXrefFormatter.INFINITY_DATE
+            has_infinity = False
+            latest_end = None
 
-            if has_infinity:
-                period_end = SecmasterXrefFormatter.INFINITY_DATE
-            else:
-                # Find latest end date among active identifiers
-                latest_end = max(record['endDate'] for record in active_identifiers.values())
-                period_end = latest_end
+            # Combine loop for both checks (avoids two passes over values)
+            for record in active_identifiers.values():
+                end_date = record['endDate']
+                if end_date == infinity_date:
+                    has_infinity = True
+                    break
+                if (latest_end is None) or (end_date > latest_end):
+                    latest_end = end_date
+
+            period_end = infinity_date if has_infinity else latest_end
 
             periods.append({
                 "startDate": current_period_start,
                 "endDate": period_end,
-                "identifiers": {record['type']: record['value']
-                                for record in active_identifiers.values()}
+                "identifiers": {r['type']: r['value'] for r in active_identifiers.values()}
             })
 
         return periods
@@ -488,8 +501,9 @@ class SecmasterXrefFormatter:
     @staticmethod
     def _subtract_one_day(date_str: str) -> str:
         try:
-            date_obj = dt.datetime.strptime(date_str, '%Y-%m-%d')
+            # Avoid repeated strptime by using fromisoformat which is faster for "%Y-%m-%d"
+            date_obj = dt.date.fromisoformat(date_str)
             prev_day = date_obj - dt.timedelta(days=1)
-            return prev_day.strftime('%Y-%m-%d')
-        except (ValueError, OverflowError):
+            return prev_day.isoformat()
+        except ValueError:
             return date_str
