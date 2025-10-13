@@ -30,7 +30,9 @@ def _backtest_engines():
     from gs_quant.backtests.equity_vol_engine import EquityVolEngine
     from gs_quant.backtests.generic_engine import GenericEngine
     from gs_quant.backtests.predefined_asset_engine import PredefinedAssetEngine
-    return [GenericEngine(), PredefinedAssetEngine(), EquityVolEngine()]
+    if not hasattr(_backtest_engines, "_engine_instances"):
+        _backtest_engines._engine_instances = [GenericEngine(), PredefinedAssetEngine(), EquityVolEngine()]
+    return _backtest_engines._engine_instances.copy()
 
 
 @dataclass_json
