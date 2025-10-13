@@ -47,17 +47,28 @@ def __interpolate_step(x: pd.Series, dates: pd.Series = None) -> pd.Series:
     first_date = pd.Timestamp(dates.index[0]) if isinstance(x.index[0], pd.Timestamp) else dates.index[0]
 
     # locate previous valid date or take first value from series
-    prev = x.index[0] if first_date < x.index[0] else x.index[x.index.get_indexer([first_date], method='pad')]
+    prev = x.index[0] if first_date < x.index[0] else x.index[x.index.get_indexer([first_date], method='pad')[0]]
 
     current = x[prev]
 
     curve = x.align(dates, 'right', )[0]  # only need values from dates
 
-    for knot in curve.items():
-        if np.isnan(knot[1]):
-            curve[knot[0]] = current
+    # Convert to numpy arrays for vectorized operations
+    arr = curve.values
+    isnan = np.isnan(arr)
+    if not np.any(isnan):
+        return curve
+
+    # Vectorized forward-fill step
+    out = arr.copy()
+    last_valid = current
+    for i in range(len(arr)):
+        if isnan[i]:
+            out[i] = last_valid
         else:
-            current = knot[1]
+            last_valid = out[i]
+
+    curve.values[:] = out
     return curve
 
 
