@@ -681,7 +681,9 @@ def day_count(first: dt.date, second: dt.date) -> int:
     """
     if not (isinstance(first, dt.date) and isinstance(second, dt.date)):
         raise MqValueError('inputs must be dates')
-    return np.busday_count(first, second)
+    # Directly use the ISO format string to avoid numpy's datetime64 construction overhead
+    # This avoids conversion from Python date to numpy datetime and is faster when repeated many times
+    return np.busday_count(first.isoformat(), second.isoformat())
 
 
 @plot_function
