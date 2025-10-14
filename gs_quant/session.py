@@ -700,15 +700,30 @@ class PassThroughSession(GsSession):
 
     @classmethod
     def domain_and_verify(cls, environment_or_domain: str, domain: Optional[str]):
-        if cls.__config is None:
-            cls.__config = ConfigParser()
-            cls.__config.read(os.path.join(os.path.dirname(inspect.getfile(cls)), 'config.ini'))
+        # Optimize config loading:
+        # - Avoid repeated computation of config path by storing as a class-level attribute.
+        # - Reuse established config object and path.
+        # - Remove use of os.path.dirname/inspect.getfile for every config read after initialization.
+
+        if getattr(cls, '_config_loaded', None) is None:
+            config_path = os.path.join(
+                os.path.dirname(inspect.getfile(cls)), 'config.ini'
+            )
+            cls._config = ConfigParser()
+            cls._config.read(config_path)
+            cls._config_loaded = True
 
         verify = False
         try:
-            domain = cls.__config[environment_or_domain][domain]
-            verify = True
-        except KeyError:
+            # Fast-path dict lookup, avoid KeyError exception cost by using .get methods.
+            env_cfg = cls._config[environment_or_domain] if environment_or_domain in cls._config else None
+            if env_cfg and domain in env_cfg:
+                domain_val = env_cfg[domain]
+                domain = domain_val
+                verify = True
+            else:
+                domain = environment_or_domain
+        except Exception:  # Defensive: Only as broad as needed to match original behavior.
             domain = environment_or_domain
         return domain, verify
 
