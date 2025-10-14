@@ -69,10 +69,11 @@ class ValueOverride(Override):
         self.value = value
 
     def as_dict(self):
-        override = super().as_dict()
-        override['type'] = VALUE_OVERRIDE
-        override['value'] = self.value
-        return override
+        return {
+            'columnNames': self.column_names,
+            'type': VALUE_OVERRIDE,
+            'value': self.value
+        }
 
     @classmethod
     def from_dict(cls, obj, ref):
