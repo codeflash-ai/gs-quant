@@ -551,12 +551,33 @@ def append(series: List[pd.Series]) -> pd.Series:
     """
     if not len(series):
         return pd.Series(dtype='float64')
-    res = series[0].copy()
+    if len(series) == 1:
+        return series[0].copy()
+    out = []
+    last_index = None
+    # Use the first series as is
+    first = series[0]
+    out.append(first.copy())
+    last_index = first.index[-1]
     for i in range(1, len(series)):
         cur = series[i]
-        start = res.index[-1]
-        res = pd.concat([res, cur.loc[cur.index > start]])
-    return res
+        # Use numpy for fast boolean indexing if possible
+        cur_idx = cur.index
+        # This comparison works for most index types (DatetimeIndex, etc)
+        mask = cur_idx > last_index
+        # avoid .loc for performance, use array-wise slicing
+        if mask.any():
+            sliced = cur.iloc[mask.nonzero()[0][0]:]
+            out.append(sliced)
+            last_index = sliced.index[-1]
+        else:
+            # nothing to append from this series, update last_index anyway to keep exact behavior
+            if len(cur) > 0:
+                last_index = cur.index[-1]
+    if len(out) == 1:
+        return out[0]
+    # concat at once to minimize overhead
+    return pd.concat(out)
 
 
 @plot_function
