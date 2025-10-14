@@ -1782,11 +1782,14 @@ class SecurityMaster:
                                           id_type: SecurityIdentifier,
                                           as_of: Union[dt.date, dt.datetime] = None,
                                           fields: Optional[List[str]] = None) -> dict:
-        as_of = as_of or dt.datetime(2100, 1, 1)
+        if as_of is None:
+            as_of_date = '2100-01-01'
+        else:
+            as_of_date = as_of.strftime('%Y-%m-%d')
         type_ = id_type.value
         params = {
             type_: id_value,
-            'asOfDate': as_of.strftime('%Y-%m-%d')  # TODO: update endpoint to take times
+            'asOfDate': as_of_date  # TODO: update endpoint to take times
         }
         if fields is not None:
             request_fields = {
