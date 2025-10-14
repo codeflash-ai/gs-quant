@@ -27,6 +27,7 @@ from ..datetime import GsCalendar
 from ..datetime.date import DayCountConvention, PaymentFrequency, day_count_fraction
 from ..datetime.date import date_range as _date_range
 from ..errors import MqValueError, MqTypeError
+from functools import reduce
 
 """
 Date and time manipulation for timeseries, including date or time shifting, calendar operations, curve alignment and
@@ -623,9 +624,7 @@ def union(x: List[pd.Series]) -> pd.Series:
 
     """
     if len(x):
-        res = pd.Series(dtype='float64', index=x[0].index)
-        for series in x:
-            res = res.combine_first(series)
+        res = reduce(lambda a, b: a.combine_first(b), x)
     else:
         res = pd.Series(dtype='float64')
     return res
