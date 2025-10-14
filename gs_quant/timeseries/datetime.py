@@ -586,14 +586,15 @@ def prepend(x: List[pd.Series]) -> pd.Series:
     :func:`union`
 
     """
-    res = pd.Series(dtype='float64')
+    slices = []
     for i in range(len(x)):
         this = x[i]
         if i == len(x) - 1:
-            return pd.concat([res, this])
-        end = x[i + 1].index[0]
-        res = pd.concat([res, this.loc[this.index < end]])
-    return res
+            slices.append(this)
+        else:
+            end = x[i + 1].index[0]
+            slices.append(this.loc[this.index < end])
+    return pd.concat(slices) if slices else pd.Series(dtype='float64')
 
 
 @plot_function
