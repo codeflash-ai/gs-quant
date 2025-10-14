@@ -863,9 +863,10 @@ class Cross(Asset):
         if isinstance(asset_class, str):
             asset_class = get_enum_value(AssetClass, asset_class)
         Asset.__init__(self, id_, asset_class, name, entity=entity)
+        self._cross_type = AssetType.CROSS
 
     def get_type(self) -> AssetType:
-        return AssetType.CROSS
+        return self._cross_type
 
 
 class Future(Asset):
