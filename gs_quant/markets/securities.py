@@ -1343,7 +1343,7 @@ class Security:
         return str({k: v for k, v in self.__dict__.items() if not k.startswith("_")})
 
     def get_identifiers(self):
-        return deepcopy(self._ids)
+        return self._ids.copy()
 
 
 @backoff.on_exception(backoff.expo, MqRequestError, giveup=lambda e: e.status != 429)
