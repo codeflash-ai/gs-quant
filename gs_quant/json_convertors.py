@@ -51,9 +51,16 @@ def decode_optional_date(value: Optional[str]) -> Optional[dt.date]:
 def decode_optional_time(value: Optional[str]) -> Optional[dt.time]:
     # from dataclasses-json 0.6.5 onwards the global config for type T will be applied to Optional[T]
     # So this decoder would become redundant, to allow any version we simply return if it's already a time
-    if value is None or isinstance(value, dt.time):
+    if value is None:
         return value
-    elif isinstance(value, str):
+    vtype = type(value)
+    if vtype is dt.time:
+        return value
+    if vtype is str:
+        return dt.time.fromisoformat(value)
+    if isinstance(value, dt.time):
+        return value
+    if isinstance(value, str):
         return dt.time.fromisoformat(value)
 
     raise ValueError(f'Cannot convert {value} to date')
