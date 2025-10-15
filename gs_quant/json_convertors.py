@@ -115,7 +115,11 @@ def decode_dict_dict_date_key(value):
 
 
 def decode_dict_date_value(value):
-    return {k: dt.date.fromisoformat(d) for k, d in value.items()} if value is not None else None
+    if value is not None:
+        _fromiso = dt.date.fromisoformat
+        return {k: _fromiso(d) for k, d in value.items()}
+    else:
+        return None
 
 
 def decode_datetime_tuple(blob: Tuple[str, ...]):
