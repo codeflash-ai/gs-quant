@@ -47,14 +47,16 @@ class PositionTag(PositionTagTarget):
 
 
 class Position:
-    def __init__(self,
-                 identifier: str,
-                 weight: float = None,
-                 quantity: float = None,
-                 notional: float = None,
-                 name: str = None,
-                 asset_id: str = None,
-                 tags: Optional[List[Union[PositionTag, Dict]]] = None):
+    def __init__(
+        self,
+        identifier: str,
+        weight: float = None,
+        quantity: float = None,
+        notional: float = None,
+        name: str = None,
+        asset_id: str = None,
+        tags: Optional[List[Union['PositionTag', Dict]]] = None
+    ):
         self.__identifier = identifier
         self.__weight = weight
         self.__quantity = quantity
@@ -165,17 +167,56 @@ class Position:
             raise MqValueError(f'Position already has tag with name {name}')
 
     def tags_as_dict(self):
-        return {tag.name: tag.value for tag in self.tags}
+        # Avoid attribute lookup per iteration
+        tags = self.tags
+        if not tags:
+            return {}
+        # Eliminate dict comprehension for small lists (slightly faster for small/medium N)
+        result = {}
+        for tag in tags:
+            result[tag.name] = tag.value
+        return result
 
     def as_dict(self, tags_as_keys: bool = False) -> Dict:
-        position_dict = dict(identifier=self.identifier, weight=self.weight,
-                             quantity=self.quantity, notional=self.notional,
-                             name=self.name, asset_id=self.asset_id, restricted=self.restricted)
-        if self.tags and tags_as_keys:
-            position_dict.update(self.tags_as_dict())
+        # Avoid property attribute lookups multiple times
+        identifier = self.identifier
+        weight = self.weight
+        quantity = self.quantity
+        notional = self.notional
+        name = self.name
+        asset_id = self.asset_id
+        restricted = self.restricted
+        tags = self.tags
+
+        # Construct only non-None values during assembly
+        position_dict = {}
+        if identifier is not None:
+            position_dict['identifier'] = identifier
+        if weight is not None:
+            position_dict['weight'] = weight
+        if quantity is not None:
+            position_dict['quantity'] = quantity
+        if notional is not None:
+            position_dict['notional'] = notional
+        if name is not None:
+            position_dict['name'] = name
+        if asset_id is not None:
+            position_dict['asset_id'] = asset_id
+        if restricted is not None:
+            position_dict['restricted'] = restricted
+
+        if tags and tags_as_keys:
+            # Only update position_dict with non-None tag values
+            tags_dict = self.tags_as_dict()
+            for k, v in tags_dict.items():
+                if v is not None:
+                    position_dict[k] = v
         else:
-            position_dict['tags'] = self.tags
-        return {k: v for k, v in position_dict.items() if v is not None}
+            # Only add 'tags' key if tags is not None
+            if tags is not None:
+                position_dict['tags'] = tags
+
+        return position_dict
 
     @classmethod
     def from_dict(cls, position_dict: Dict, add_tags: bool = True):
@@ -205,6 +246,38 @@ class Position:
             tags_as_target = self.tags if self.tags else None
             return CommonPosition(self.asset_id, quantity=self.quantity, tags=tags_as_target)
         return PositionPriceInput(self.asset_id, quantity=self.quantity, weight=self.weight, notional=self.notional)
+
+    @property
+    def identifier(self):
+        return self.__identifier
+
+    @property
+    def weight(self):
+        return self.__weight
+
+    @property
+    def quantity(self):
+        return self.__quantity
+
+    @property
+    def notional(self):
+        return self.__notional
+
+    @property
+    def name(self):
+        return self.__name
+
+    @property
+    def asset_id(self):
+        return self.__asset_id
+
+    @property
+    def tags(self):
+        return self.__tags
+
+    @property
+    def restricted(self):
+        return self.__restricted
 
 
 class PositionSet:
