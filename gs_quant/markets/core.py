@@ -623,7 +623,7 @@ class PositionContext(ContextBaseWithDefault):
                 raise ValueError("The PositionContext does not support a position_date in the future")
 
         self.__position_date = position_date if position_date \
-            else business_day_offset(dt.date.today(), 0, roll='preceding')
+            else self._get_today_preceding_business_day()
 
     @property
     def position_date(self):
@@ -637,3 +637,10 @@ class PositionContext(ContextBaseWithDefault):
         clone_kwargs = {k: getattr(self, k, None) for k in signature(self.__init__).parameters.keys()}
         clone_kwargs.update(kwargs)
         return self.__class__(**clone_kwargs)
+
+    @staticmethod
+    def _get_today_preceding_business_day() -> dt.date:
+        if not hasattr(PositionContext, '_CACHED_TODAY_BUSINESS_DAY'):
+            today = dt.date.today()
+            PositionContext._CACHED_TODAY_BUSINESS_DAY = business_day_offset(today, 0, roll='preceding')
+        return PositionContext._CACHED_TODAY_BUSINESS_DAY
