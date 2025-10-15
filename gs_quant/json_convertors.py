@@ -22,6 +22,8 @@ import pandas as pd
 from dataclasses_json import config
 from dateutil.parser import isoparse
 
+_ISO_FRACTION_RE = re.compile(r'\.([0-9]*)Z$')
+
 __valid_date_formats = ('%Y-%m-%d',  # '2020-07-28'
                         '%d%b%y',  # '28Jul20'
                         '%d%b%Y',  # '28Jul2020'
@@ -168,14 +170,15 @@ def decode_datetime(value: Optional[Union[int, str]]) -> Optional[dt.datetime]:
     if isinstance(value, int):
         return dt.datetime.fromtimestamp(value / 1000)
     elif isinstance(value, str):
-        matcher = re.search('\\.([0-9]*)Z$', value)
-        if matcher:
-            sub_seconds = matcher.group(1)
-            if len(sub_seconds) > 6:
-                value = re.sub(matcher.re, '.{}Z'.format(sub_seconds[:6]), value)
+        if value.endswith('Z') and '.' in value[-8:]:
+            matcher = _ISO_FRACTION_RE.search(value)
+            if matcher:
+                sub_seconds = matcher.group(1)
+                if len(sub_seconds) > 6:
+                    dot_pos = value.rfind('.')
+                    value = value[:dot_pos+1] + sub_seconds[:6] + 'Z'
 
         return isoparse(value)
-
     raise TypeError(f'Cannot convert {value} to datetime')
 
 
