@@ -68,8 +68,21 @@ def decode_date_tuple(blob: Tuple[str, ...]):
 
 
 def encode_date_tuple(values: Tuple[Optional[Union[str, dt.date]], ...]):
-    return tuple(encode_date_or_str(value) if isinstance(value, (str, dt.date)) else None for value in values) if \
-        values is not None else None
+    if values is None:
+        return None
+    # Inline logic to reduce function call overhead and avoid repeated isinstance tuple creation
+    result = []
+    dt_date = dt.date   # local var; slightly faster attribute access
+    for value in values:
+        if value is None or type(value) is str:
+            result.append(value)
+        elif type(value) is dt_date:
+            result.append(value.isoformat())
+        elif isinstance(value, dt_date):
+            result.append(value.isoformat())
+        else:
+            result.append(None)
+    return tuple(result)
 
 
 def decode_iso_date_or_datetime(value: Any) -> Union[Tuple[DateOrDateTime, ...], DateOrDateTime]:
