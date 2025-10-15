@@ -54,7 +54,7 @@ class Position:
                  notional: float = None,
                  name: str = None,
                  asset_id: str = None,
-                 tags: Optional[List[Union[PositionTag, Dict]]] = None):
+                 tags: Optional[List[Union['PositionTag', Dict]]] = None):
         self.__identifier = identifier
         self.__weight = weight
         self.__quantity = quantity
@@ -70,15 +70,41 @@ class Position:
     def __eq__(self, other) -> bool:
         if not isinstance(other, Position):
             return False
-        for prop in ['asset_id', 'weight', 'notional', 'quantity', 'tags']:
-            # Calculations from V2 sometimes add insignificant decimals places
-            slf = get(self, prop)
-            oth = get(other, prop)
-            if prop in ['weight', 'notional', 'quantity']:
-                if not (slf is None or oth is None) and not round(slf, 5) == round(oth, 5):
-                    return False
-            elif not (slf is None and oth is None) and not slf == oth:
-                return False
+
+        # Avoid expensive pydash.get for direct attribute access
+        # Lists must match original properties checked in exact order
+        # Use self.__attribute for protected members
+        
+        # asset_id
+        slf = self.__asset_id
+        oth = other.__asset_id
+        if not (slf is None and oth is None) and slf != oth:
+            return False
+
+        # weight
+        slf = self.__weight
+        oth = other.__weight
+        if not (slf is None or oth is None) and round(slf, 5) != round(oth, 5):
+            return False
+
+        # notional
+        slf = self.__notional
+        oth = other.__notional
+        if not (slf is None or oth is None) and round(slf, 5) != round(oth, 5):
+            return False
+
+        # quantity
+        slf = self.__quantity
+        oth = other.__quantity
+        if not (slf is None or oth is None) and round(slf, 5) != round(oth, 5):
+            return False
+
+        # tags
+        slf = self.__tags
+        oth = other.__tags
+        if not (slf is None and oth is None) and slf != oth:
+            return False
+
         return True
 
     def __hash__(self):
