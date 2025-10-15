@@ -27,10 +27,12 @@ from gs_quant.datetime.gscalendar import GsCalendar
 
 DateOrDates = Union[dt.date, Iterable[dt.date]]
 
-location_to_tz_mapping = {PricingLocation.NYC: zoneinfo.ZoneInfo("America/New_York"),
-                          PricingLocation.LDN: zoneinfo.ZoneInfo("Europe/London"),
-                          PricingLocation.HKG: zoneinfo.ZoneInfo("Asia/Hong_Kong"),
-                          PricingLocation.TKO: zoneinfo.ZoneInfo("Asia/Tokyo")}
+location_to_tz_mapping = {
+    PricingLocation.NYC: zoneinfo.ZoneInfo("America/New_York"),
+    PricingLocation.LDN: zoneinfo.ZoneInfo("Europe/London"),
+    PricingLocation.HKG: zoneinfo.ZoneInfo("Asia/Hong_Kong"),
+    PricingLocation.TKO: zoneinfo.ZoneInfo("Asia/Tokyo"),
+}
 
 
 class PaymentFrequency(IntEnum):
@@ -39,6 +41,7 @@ class PaymentFrequency(IntEnum):
     Provides an enumeration of different payment frequencies used to to discount cashflows and accrue interest
 
     """
+
     DAILY = 252
     WEEKLY = 52
     SEMI_MONTHLY = 26
@@ -77,8 +80,11 @@ class DayCountConvention(Enum):
     ONE_ONE = "ONE_ONE"
 
 
-def is_business_day(dates: DateOrDates, calendars: Union[str, Tuple[str, ...]] = (), week_mask: Optional[str] = None) \
-        -> Union[bool, Tuple[bool, ...]]:
+def is_business_day(
+    dates: DateOrDates,
+    calendars: Union[str, Tuple[str, ...]] = (),
+    week_mask: Optional[str] = None,
+) -> Union[bool, Tuple[bool, ...]]:
     """
     Determine whether each date in dates is a business day
 
@@ -99,9 +105,12 @@ def is_business_day(dates: DateOrDates, calendars: Union[str, Tuple[str, ...]] =
 
 
 def business_day_offset(
-        dates: DateOrDates, offsets: Union[int, Iterable[int]],
-        roll: str = 'raise', calendars: Union[str, Tuple[str, ...]] = (),
-        week_mask: Optional[str] = None) -> DateOrDates:
+    dates: DateOrDates,
+    offsets: Union[int, Iterable[int]],
+    roll: str = "raise",
+    calendars: Union[str, Tuple[str, ...]] = (),
+    week_mask: Optional[str] = None,
+) -> DateOrDates:
     """
     Apply offsets to the dates and move to the nearest business date
 
@@ -118,14 +127,17 @@ def business_day_offset(
     >>> prev_bus_date = business_day_offset(dt.date.today(), -1, roll='forward')
     """
     calendar = GsCalendar.get(calendars)
-    res = np.busday_offset(dates, offsets, roll, busdaycal=calendar.business_day_calendar(week_mask)).astype(dt.date)
+    res = np.busday_offset(
+        dates, offsets, roll, busdaycal=calendar.business_day_calendar(week_mask)
+    ).astype(dt.date)
     return tuple(res) if isinstance(res, np.ndarray) else res
 
 
 def prev_business_date(
-        dates: DateOrDates = dt.date.today(),
-        calendars: Union[str, Tuple[str, ...]] = (),
-        week_mask: Optional[str] = None) -> DateOrDates:
+    dates: DateOrDates = dt.date.today(),
+    calendars: Union[str, Tuple[str, ...]] = (),
+    week_mask: Optional[str] = None,
+) -> DateOrDates:
     """
     Returns the previous business date for a given date or date series, defaulting to today.
 
@@ -139,11 +151,32 @@ def prev_business_date(
     >>> import datetime as dt
     >>> prev_bus_date = prev_business_date()
     """
-    return business_day_offset(dates, -1, roll='forward', calendars=calendars, week_mask=week_mask)
+    # Fast path: no calendars, no custom week_mask, single date input
+    # Weekdays: Mon-Fri (0-4)
+    if (
+        not calendars
+        and week_mask is None
+        and isinstance(dates, dt.date)
+        and not isinstance(dates, dt.datetime)
+    ):
+        prev_date = dates - dt.timedelta(days=1)
+        while prev_date.weekday() > 4:  # Saturday=5, Sunday=6
+            prev_date -= dt.timedelta(days=1)
+        return prev_date
+    # Slow path: full handling
+    from gs_quant.datetime.date import business_day_offset
+
+    return business_day_offset(
+        dates, -1, roll="forward", calendars=calendars, week_mask=week_mask
+    )
 
 
-def business_day_count(begin_dates: DateOrDates, end_dates: DateOrDates, calendars: Union[str, Tuple[str, ...]] = (
-), week_mask: Optional[str] = None) -> Union[int, Tuple[int, ...]]:
+def business_day_count(
+    begin_dates: DateOrDates,
+    end_dates: DateOrDates,
+    calendars: Union[str, Tuple[str, ...]] = (),
+    week_mask: Optional[str] = None,
+) -> Union[int, Tuple[int, ...]]:
     """
     Determine the number of business days between begin_dates and end_dates
 
@@ -160,14 +193,18 @@ def business_day_count(begin_dates: DateOrDates, end_dates: DateOrDates, calenda
     >>> bus_days = business_day_count(today, today + dt.timedelta(days=7))
     """
     calendar = GsCalendar.get(calendars)
-    res = np.busday_count(begin_dates, end_dates, busdaycal=calendar.business_day_calendar(week_mask))
+    res = np.busday_count(
+        begin_dates, end_dates, busdaycal=calendar.business_day_calendar(week_mask)
+    )
     return tuple(res) if isinstance(res, np.ndarray) else res
 
 
-def date_range(begin: Union[int, dt.date],
-               end: Union[int, dt.date],
-               calendars: Union[str, Tuple[str, ...]] = (),
-               week_mask: Optional[str] = None) -> Iterable[dt.date]:
+def date_range(
+    begin: Union[int, dt.date],
+    end: Union[int, dt.date],
+    calendars: Union[str, Tuple[str, ...]] = (),
+    week_mask: Optional[str] = None,
+) -> Iterable[dt.date]:
     """
     Construct a range of dates
 
@@ -188,28 +225,38 @@ def date_range(begin: Union[int, dt.date],
     """
     if isinstance(begin, dt.date):
         if isinstance(end, dt.date):
+
             def f():
                 prev = begin
                 if prev > end:
-                    raise ValueError('begin must be <= end')
+                    raise ValueError("begin must be <= end")
 
                 while prev <= end:
                     yield prev
-                    prev = business_day_offset(prev, 1, calendars=calendars, week_mask=week_mask)
+                    prev = business_day_offset(
+                        prev, 1, calendars=calendars, week_mask=week_mask
+                    )
 
             return (d for d in f())
         elif isinstance(end, int):
-            return (business_day_offset(begin, i, calendars=calendars, week_mask=week_mask) for i in range(end))
+            return (
+                business_day_offset(begin, i, calendars=calendars, week_mask=week_mask)
+                for i in range(end)
+            )
         else:
-            raise ValueError('end must be a date or int')
+            raise ValueError("end must be a date or int")
     elif isinstance(begin, int):
         if isinstance(end, dt.date):
-            return (business_day_offset(end, -i, roll='preceding', calendars=calendars, week_mask=week_mask)
-                    for i in range(begin))
+            return (
+                business_day_offset(
+                    end, -i, roll="preceding", calendars=calendars, week_mask=week_mask
+                )
+                for i in range(begin)
+            )
         else:
-            raise ValueError('end must be a date if begin is an int')
+            raise ValueError("end must be a date if begin is an int")
     else:
-        raise ValueError('begin must be a date or int')
+        raise ValueError("begin must be a date or int")
 
 
 def today(location: Optional[PricingLocation] = None) -> dt.date:
@@ -219,7 +266,7 @@ def today(location: Optional[PricingLocation] = None) -> dt.date:
     tz = location_to_tz_mapping.get(location, None)
 
     if tz is None:
-        raise ValueError(f'Unrecognized timezone {location}')
+        raise ValueError(f"Unrecognized timezone {location}")
 
     return dt.datetime.now(tz).date()
 
@@ -253,10 +300,10 @@ def has_feb_29(start: dt.date, end: dt.date):
 
 
 def day_count_fraction(
-        start: dt.date,  # First payment date
-        end: dt.date,  # Second payment date
-        convention: DayCountConvention = DayCountConvention.ACTUAL_360,
-        frequency: PaymentFrequency = PaymentFrequency.MONTHLY
+    start: dt.date,  # First payment date
+    end: dt.date,  # Second payment date
+    convention: DayCountConvention = DayCountConvention.ACTUAL_360,
+    frequency: PaymentFrequency = PaymentFrequency.MONTHLY,
 ):
     """
     Compute day count fraction between dates
@@ -300,4 +347,4 @@ def day_count_fraction(
     elif convention == DayCountConvention.ONE_ONE:
         return 1
     else:
-        raise ValueError('Unknown day count convention: ' + convention.value)
+        raise ValueError("Unknown day count convention: " + convention.value)

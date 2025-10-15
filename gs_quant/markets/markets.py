@@ -61,12 +61,12 @@ def close_market_date(location: Optional[Union[PricingLocation, str]] = None, da
     from .core import PricingContext
     date = date or PricingContext.current.pricing_date
 
-    location_tz = location_to_tz_mapping[PricingLocation(location)]
+    location_enum = PricingLocation(location)
+    location_tz = location_to_tz_mapping[location_enum]
     now_time = dt.datetime.now().astimezone(location_tz).replace(tzinfo=None)
-    hr_offset = roll_hr_and_min[0]
-    min_offset = roll_hr_and_min[1]
-    roll_time = dt.datetime(date.year, date.month, date.day).replace(tzinfo=None) + \
-        dt.timedelta(hours=hr_offset, minutes=min_offset)
+    hr_offset, min_offset = roll_hr_and_min
+    roll_time = dt.datetime(date.year, date.month, date.day) + dt.timedelta(hours=hr_offset, minutes=min_offset)
+    # Both times are naive (tzinfo=None)
     if now_time < roll_time:
         # Don't use the calendars argument here as external users do not (yet) have access to that dataset
         date = prev_business_date(date)
