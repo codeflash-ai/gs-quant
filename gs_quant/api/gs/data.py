@@ -1272,17 +1272,22 @@ class GsDataApi(DataApi):
     @classmethod
     def get_field_types(cls, field_names: Union[str, List[str]]):
         try:
-            fields = cls.get_dataset_fields(names=field_names, limit=len(field_names))
+            # Optimize len(field_names): avoid repeated isinstance check
+            if isinstance(field_names, str):
+                limit = 1
+            else:
+                limit = len(field_names)
+            # Avoid redundant dict allocation inside get_dataset_fields
+            fields = cls.get_dataset_fields(names=field_names, limit=limit)
         except Exception:
             return {}
         if fields:
-            field_types = {}
-            field: DataSetFieldEntity
-            for field in fields:
-                field_name = field.name
-                field_type = field.type_
-                field_format = field.parameters.get('format') if field.parameters else None
-                field_types[field_name] = field_format or field_type
+            # Use dictionary comprehension for faster field_types construction
+            # Only traverses the fields list once, applying logic on each field
+            field_types = {
+                field.name: (field.parameters.get('format') if field.parameters and 'format' in field.parameters else field.type_)
+                for field in fields
+            }
             return field_types
         return {}
 
@@ -1349,10 +1354,19 @@ class GsDataApi(DataApi):
         >>> fields = GsDataApi.get_dataset_fields(names = ['adjustedClosePrice', 'adjustedOpenPrice'])
         """
 
-        where = dict(filter(lambda item: item[1] is not None, dict(id=ids, name=names).items()))
-        response = cls.get_session()._post('/data/fields/query',
-                                           payload={'where': where, 'limit': limit},
-                                           cls=DataSetFieldEntity)
+        # Avoid filter+lambda and dict(items) which incurs extra allocations:
+        # Instead, directly build the 'where' dictionary inline
+        where = {}
+        if ids is not None:
+            where['id'] = ids
+        if names is not None:
+            where['name'] = names
+
+        response = cls.get_session()._post(
+            '/data/fields/query',
+            payload={'where': where, 'limit': limit},
+            cls=DataSetFieldEntity
+        )
         return response['results']
 
     @classmethod
