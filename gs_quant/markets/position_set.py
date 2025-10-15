@@ -215,12 +215,12 @@ class PositionSet:
     """
 
     def __init__(self,
-                 positions: List[Position],
+                 positions: List['Position'],
                  date: dt.date = dt.date.today(),
                  divisor: float = None,
                  reference_notional: float = None,
-                 unresolved_positions: List[Position] = None,
-                 unpriced_positions: List[Position] = None):
+                 unresolved_positions: List['Position'] = None,
+                 unpriced_positions: List['Position'] = None):
         if reference_notional is not None:
             for p in positions:
                 if p.weight is None:
@@ -626,14 +626,25 @@ class PositionSet:
 
         :func:`from_frame` :func:`from_dicts` :func:`from_list`
         """
-        positions = []
-        for p in self.positions:
-            position = dict(date=self.date.isoformat())
-            if self.divisor is not None:
-                position.update(dict(divisor=self.divisor))
-            position.update(p.as_dict(tags_as_keys=add_tags))
-            positions.append(position)
-        return pd.DataFrame(positions)
+
+        # Hoist values and attribute lookups outside the loop for better performance
+        date_iso = self.date.isoformat()
+        divisor = self.divisor
+        has_divisor = divisor is not None
+        positions = self.positions
+
+        # Use a list comprehension for better performance and memory efficiency
+        def make_position_dict(p):
+            d = {'date': date_iso}
+            if has_divisor:
+                d['divisor'] = divisor
+            d.update(p.as_dict(tags_as_keys=add_tags))
+            return d
+
+        position_dicts = [make_position_dict(p) for p in positions]
+
+        # Construct DataFrame directly from the records to avoid extra Python dictionary allocations up front
+        return pd.DataFrame.from_records(position_dicts)
 
     def resolve(self, **kwargs):
         """
@@ -1520,3 +1531,27 @@ class PositionSet:
             input_position_set.__unpriced_positions = unpriced_positions
 
         _logger.info(f"Total time to process pricing results is {time() - next_start} seconds")
+
+    @property
+    def positions(self):
+        return self.__positions
+
+    @property
+    def date(self):
+        return self.__date
+
+    @property
+    def divisor(self):
+        return self.__divisor
+
+    @property
+    def reference_notional(self):
+        return self.__reference_notional
+
+    @property
+    def unresolved_positions(self):
+        return self.__unresolved_positions
+
+    @property
+    def unpriced_positions(self):
+        return self.__unpriced_positions
