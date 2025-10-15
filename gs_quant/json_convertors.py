@@ -202,16 +202,15 @@ def decode_instrument(value: Optional[Dict]):
 
 
 def decode_named_instrument(value: Optional[Union[Iterable[Dict], dict]]):
-    from gs_quant.instrument import Instrument
     if isinstance(value, (list, tuple)):
         return tuple(decode_named_instrument(v) for v in value)
-    elif isinstance(value, dict) and 'portfolio_name' in value.keys():
+    elif isinstance(value, dict) and 'portfolio_name' in value:
         return decode_named_portfolio(value)
-    return Instrument.from_dict(value) if value else None
+    return _get_instrument_class().from_dict(value) if value else None
 
 
 def decode_named_portfolio(value):
-    from gs_quant.markets.portfolio import Portfolio
+    Portfolio = _get_portfolio_class()
     return Portfolio([decode_named_instrument(v) for v in value['instruments']],
                      name=value['portfolio_name'])
 
@@ -327,3 +326,15 @@ def dc_decode(*classes, name_field='class_type', allow_missing=False):
     mappings = ((_get_dc_type(cls, name_field, allow_missing), cls) for cls in classes)
     type_to_cls_map = dict((k, v) for k, v in mappings if k is not None)
     return _value_decoder(type_to_cls_map, None)
+
+def _get_instrument_class():
+    if not hasattr(_get_instrument_class, '_cls'):
+        from gs_quant.instrument import Instrument
+        _get_instrument_class._cls = Instrument
+    return _get_instrument_class._cls
+
+def _get_portfolio_class():
+    if not hasattr(_get_portfolio_class, '_cls'):
+        from gs_quant.markets.portfolio import Portfolio
+        _get_portfolio_class._cls = Portfolio
+    return _get_portfolio_class._cls
