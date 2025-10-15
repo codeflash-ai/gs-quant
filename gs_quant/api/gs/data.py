@@ -1261,11 +1261,10 @@ class GsDataApi(DataApi):
         results = cls.get_session()._get(f'/data/catalog/{dataset_id}')
         fields = results.get("fields")
         if fields:
-            field_types = {}
-            for key, value in fields.items():
-                field_type = value.get('type')
-                field_format = value.get('format')
-                field_types[key] = field_format or field_type
+            field_types = {
+                key: value.get('format') or value.get('type')
+                for key, value in fields.items()
+            }
             return field_types
         raise RuntimeError(f"Unable to get Dataset schema for {dataset_id}")
 
@@ -1310,10 +1309,16 @@ class GsDataApi(DataApi):
 
             df = pd.DataFrame(data, columns={**dataset_types, **incoming_data_data_types})
 
-            for field_name, type_name in dataset_types.items():
-                if df.get(field_name) is not None and type_name in ('date', 'date-time') and \
-                        len(df.get(field_name).value_counts()) > 0:
-                    df[field_name] = pd.to_datetime(df[field_name],
+            # Precompute date fields to avoid repeated type checks
+            date_fields = [
+                field_name for field_name, type_name in dataset_types.items()
+                if type_name in ('date', 'date-time') and field_name in df.columns
+            ]
+
+            for field_name in date_fields:
+                column = df[field_name]
+                if column.notna().any():
+                    df[field_name] = pd.to_datetime(column,
                                                     format='ISO8601' if int(
                                                         pd.__version__.split('.')[0]) == 2 else None)
 
