@@ -475,7 +475,7 @@ class PositionSet:
         :func:`get_hard_to_borrow_positions` :func:`remove_hard_to_borrow_positions`
         """
         positions = [p.as_dict() for p in self.positions if p.restricted]
-        return pd.DataFrame(positions)
+        return pd.DataFrame.from_records(positions)
 
     def remove_restricted_positions(self):
         """
