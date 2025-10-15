@@ -21,11 +21,12 @@ from typing import Optional, Union, Iterable, Dict, Tuple, Any
 import pandas as pd
 from dataclasses_json import config
 from dateutil.parser import isoparse
+from functools import lru_cache
 
-__valid_date_formats = ('%Y-%m-%d',  # '2020-07-28'
-                        '%d%b%y',  # '28Jul20'
-                        '%d%b%Y',  # '28Jul2020'
-                        '%d-%b-%y',  # '28-Jul-20'
+__valid_date_formats = ('%Y-%m-%d',
+                        '%d%b%y',
+                        '%d%b%Y',
+                        '%d-%b-%y',
                         '%d/%m/%Y')  # '28/07/2020
 
 DateOrDateTime = Union[dt.date, dt.datetime]
@@ -122,12 +123,13 @@ def decode_datetime_tuple(blob: Tuple[str, ...]):
     return tuple(optional_from_isodatetime(s) for s in blob) if isinstance(blob, (tuple, list)) else None
 
 
+@lru_cache(maxsize=256)
 def __try_decode_valid_date_formats(value: str) -> Optional[dt.date]:
     for fmt in __valid_date_formats:
         try:
             return dt.datetime.strptime(value, fmt).date()
         except ValueError:
-            pass
+            continue
     return None
 
 
