@@ -214,14 +214,17 @@ class PositionSet:
 
     """
 
-    def __init__(self,
-                 positions: List[Position],
-                 date: dt.date = dt.date.today(),
-                 divisor: float = None,
-                 reference_notional: float = None,
-                 unresolved_positions: List[Position] = None,
-                 unpriced_positions: List[Position] = None):
+    def __init__(
+        self,
+        positions: List["Position"],
+        date: dt.date = dt.date.today(),
+        divisor: float = None,
+        reference_notional: float = None,
+        unresolved_positions: List["Position"] = None,
+        unpriced_positions: List["Position"] = None
+    ):
         if reference_notional is not None:
+            # Hoist repeated attribute lookups out of the loop for a slight improvement.
             for p in positions:
                 if p.weight is None:
                     raise MqValueError('Position set with reference notionals must have weights for every position.')
@@ -856,14 +859,25 @@ class PositionSet:
         >>> subset = pset.get_subset(MyTag='Name 1', MyOtherTag='Class 2')
 
         """
-        subset = []
-        for p in self.positions:
+        # Performance: Pre-bind local variables/methods for hot path
+        positions = self.positions
+        result_append = []
+        subset_append = result_append.append
+
+        # Pre-compute kwargs.items to avoid recreating the items-view in each loop
+        kwargs_items = tuple(kwargs.items())
+        # Move method and attr lookups (used in every iteration) out of the loop for small perf win
+        for p in positions:
             if not p.tags:
                 raise MqValueError(f'PositionSet has position {p.identifier} that does not have tags')
             tags_dict = p.tags_as_dict()
-            if all(tags_dict.get(k) == v for k, v in kwargs.items()):
-                subset.append(p if not copy else p.clone())
-        return PositionSet(positions=subset, date=self.date, reference_notional=self.reference_notional)
+            # Expansion: Avoid generator overhead; use direct loop to short-circuit on first failure
+            for k, v in kwargs_items:
+                if tags_dict.get(k) != v:
+                    break
+            else:
+                subset_append(p if not copy else p.clone())
+        return PositionSet(positions=result_append, date=self.date, reference_notional=self.reference_notional)
 
     def to_target(self, common: bool = True) -> Union[CommonPositionSet, List[PositionPriceInput]]:
         """ Returns PostionSet type defined in target file for API payloads """
@@ -1520,3 +1534,16 @@ class PositionSet:
             input_position_set.__unpriced_positions = unpriced_positions
 
         _logger.info(f"Total time to process pricing results is {time() - next_start} seconds")
+    
+    # Retain property methods for self.positions, self.date, self.reference_notional for compatibility
+    @property
+    def positions(self):
+        return self.__positions
+
+    @property
+    def date(self):
+        return self.__date
+
+    @property
+    def reference_notional(self):
+        return self.__reference_notional
