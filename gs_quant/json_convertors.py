@@ -238,8 +238,10 @@ def encode_pandas_series(obj):
 
 
 def decode_pandas_series(value: dict):
-    dated_dict = {decode_iso_date_or_datetime(k): v for k, v in value.items()}
-    return pd.Series(dated_dict)
+    items = list(value.items())
+    keys = [decode_iso_date_or_datetime(k) for k, _ in items]
+    values = [v for _, v in items]
+    return pd.Series(data=values, index=keys)
 
 
 def decode_quote_report(value: Optional[dict]):
