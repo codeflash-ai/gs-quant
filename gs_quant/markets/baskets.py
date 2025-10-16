@@ -164,16 +164,22 @@ class Basket(Asset, PositionedEntity):
         :func:`get_details` :func:`poll_status` :func:`update`
 
         """
-        inputs, pricing, publish = {}, {}, {}
-        for prop in CustomBasketsCreateInputs.properties():
-            set_(inputs, prop, get(self, prop))
-        for prop in CustomBasketsPricingParameters.properties():
-            set_(pricing, prop, get(self, prop))
-        for prop in PublishParameters.properties():
-            set_(publish, prop, get(self, prop))
-        set_(inputs, 'position_set', self.position_set.to_target(common=False))
-        set_(inputs, 'pricing_parameters', CustomBasketsPricingParameters(**pricing))
-        set_(inputs, 'publish_parameters', PublishParameters(**publish))
+        # Locally bind globals for fastest lookup in tight loops
+        _get = get
+        _set = set_
+        # materialize properties only ONCE
+        cbi_props = CustomBasketsCreateInputs.properties()
+        pricing_props = CustomBasketsPricingParameters.properties()
+        publish_props = PublishParameters.properties()
+        self_ref = self
+
+        # Use fast local dict construction for the bulk property copying
+        inputs = {prop: _get(self_ref, prop) for prop in cbi_props}
+        pricing = {prop: _get(self_ref, prop) for prop in pricing_props}
+        publish = {prop: _get(self_ref, prop) for prop in publish_props}
+        _set(inputs, 'position_set', self.position_set.to_target(common=False))
+        _set(inputs, 'pricing_parameters', CustomBasketsPricingParameters(**pricing))
+        _set(inputs, 'publish_parameters', PublishParameters(**publish))
         create_inputs = CustomBasketsCreateInputs(**inputs)
 
         response = GsIndexApi.create(create_inputs)
