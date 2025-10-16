@@ -207,38 +207,6 @@ class Position:
             return CommonPosition(self.asset_id, quantity=self.quantity, tags=tags_as_target)
         return PositionPriceInput(self.asset_id, quantity=self.quantity, weight=self.weight, notional=self.notional)
 
-    @property
-    def identifier(self):
-        return self.__identifier
-
-    @property
-    def weight(self):
-        return self.__weight
-
-    @property
-    def quantity(self):
-        return self.__quantity
-
-    @property
-    def notional(self):
-        return self.__notional
-
-    @property
-    def name(self):
-        return self.__name
-
-    @property
-    def asset_id(self):
-        return self.__asset_id
-
-    @property
-    def tags(self):
-        return self.__tags
-
-    @property
-    def restricted(self):
-        return self.__restricted
-
 
 class PositionSet:
     """
