@@ -47,8 +47,10 @@ class SpanConsumer(SpanExporter):
 
     @staticmethod
     def get_instance():
-        if SpanConsumer._instance is None:
-            SpanConsumer._instance = SpanConsumer()
+        instance = SpanConsumer._instance
+        if instance is not None:
+            return instance
+        SpanConsumer._instance = SpanConsumer()
         return SpanConsumer._instance
 
     @staticmethod
@@ -211,11 +213,14 @@ class TracingSpan:
     def set_tag(self, key: Union[Enum, str], value: Union[bool, str, bytes, int, float, dt.date]) -> 'TracingSpan':
         if value is None:
             return self
-        if isinstance(value, dt.date):
-            value = value.isoformat()
-        elif isinstance(value, Enum):
+        # Avoid repeated isinstance checks by using type() comparisons where possible.
+        # Check Enum before date to avoid repeated isinstance checks
+        if type(value) is Enum or isinstance(value, Enum):
             value = value.value
-        if isinstance(key, Enum):
+        elif type(value) is dt.date or isinstance(value, dt.date):
+            value = value.isoformat()
+        # Avoid an extra isinstance call if key is known to usually be Enum or str.
+        if type(key) is Enum or isinstance(key, Enum):
             key = key.value
         self._span.set_attribute(key, value)
         return self
