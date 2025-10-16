@@ -76,6 +76,7 @@ class GsContentApi:
         if offset and (offset < 0 or offset >= limit):
             raise ValueError('Invalid offset. Offset must be >= 0 and < limit')
 
+        # Use literals for parameter passing to avoid unnecessary function calls on None
         parameters_dict = cls._build_parameters_dict(
             channel=channels,
             asset_id=asset_ids,
@@ -85,7 +86,11 @@ class GsContentApi:
             limit=[limit] if limit else None,
             order_by=[order_by] if order_by else None)
 
-        query_string = '' if not parameters_dict else cls._build_query_string(parameters_dict)
+        if parameters_dict:
+            query_string = cls._build_query_string(parameters_dict)
+        else:
+            query_string = ''
+
         contents = GsSession.current._get(f'/content{query_string}', cls=GetManyContentsResponse)
         return contents.data
 
@@ -115,11 +120,19 @@ class GsContentApi:
         filtering out any parameters for which "None" is
         the value.
         """
-        parameters = {}
+        # Use OrderedDict from the start and defer sorting/lists for later for memory efficiency
+        parameters = OrderedDict()
         for key, value in kwargs.items():
+            # Short-circuit None and empty containers
             if value:
-                parameters.setdefault(key, []).extend(sorted(value))
-        return OrderedDict(parameters)
+                # Only sort if value is a list or set of strings (but skip for int/None cases)
+                if isinstance(value, (set, list)) and value and isinstance(next(iter(value)), str):
+                    sorted_values = sorted(value)
+                else:
+                    sorted_values = value
+                # Ensure always list to match .extend usage downstream
+                parameters.setdefault(key, []).extend(sorted_values if isinstance(sorted_values, (list, set)) else [sorted_values])
+        return parameters
 
     @classmethod
     def _build_query_string(cls, parameters: dict) -> str:
@@ -131,24 +144,17 @@ class GsContentApi:
         In: { 'channel': ['G10', 'EM'], 'limit': 10 }
         Out: ?channel=G10&channel=EM&limit=10
         """
-        query_string = '?'
-
-        # Builds a list of tuples for easy iteration like:
-        # [('channel', 'channel-1'), ('channel', 'channel-2'), ('assetId', 'asset-1'), ...]
-        parameter_tuples = [(parameter_name, parameter_value)
-                            for parameter_name, parameter_values in parameters.items()
-                            for parameter_value in parameter_values]
-
-        for index, parameter_tuple in enumerate(parameter_tuples):
-            name, value = parameter_tuple
-            value = quote(value.encode()) if isinstance(value, str) else value
-
-            if name == 'order_by':
-                value = cls._convert_order_by(value)
-
-            query_string += f'{name}={value}' if index == 0 else f'&{name}={value}'
-
-        return query_string
+        # Materialize all values in a memory-efficient way (no intermediate lists of lists)
+        query_parts = []
+        for parameter_name, parameter_values in parameters.items():
+            for parameter_value in parameter_values:
+                value = quote(parameter_value.encode()) if isinstance(parameter_value, str) else parameter_value
+                if parameter_name == 'order_by':
+                    value = cls._convert_order_by(value)
+                query_parts.append(f'{parameter_name}={value}')
+        if not query_parts:
+            return ''
+        return '?' + '&'.join(query_parts)
 
     @classmethod
     def _convert_order_by(cls, order_by: dict) -> str:
