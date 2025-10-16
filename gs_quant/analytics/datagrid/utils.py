@@ -81,5 +81,13 @@ class DataGridFilter:
 
     @classmethod
     def from_dict(cls, dict_):
-        class_fields = {f.name for f in fields(cls)}
-        return DataGridFilter(**{k: v for k, v in dict_.items() if k in class_fields})
+        # Cache class dataclass fields (set) as a class variable for faster repeated lookups
+        if not hasattr(cls, '_datagridfilter_fields'):
+            cls._datagridfilter_fields = {f.name for f in fields(cls)}
+        class_fields = cls._datagridfilter_fields
+
+        # Avoid creating a new dict when all keys are valid, else filter minimally
+        if class_fields.issuperset(dict_):
+            return cls(**dict_)
+        else:
+            return cls(**{k: dict_[k] for k in dict_.keys() if k in class_fields})
