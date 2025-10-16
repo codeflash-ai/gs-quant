@@ -131,24 +131,18 @@ class GsContentApi:
         In: { 'channel': ['G10', 'EM'], 'limit': 10 }
         Out: ?channel=G10&channel=EM&limit=10
         """
-        query_string = '?'
+        fragments = []
 
-        # Builds a list of tuples for easy iteration like:
-        # [('channel', 'channel-1'), ('channel', 'channel-2'), ('assetId', 'asset-1'), ...]
-        parameter_tuples = [(parameter_name, parameter_value)
-                            for parameter_name, parameter_values in parameters.items()
-                            for parameter_value in parameter_values]
+        for parameter_name, parameter_values in parameters.items():
+            for parameter_value in parameter_values:
+                value = quote(parameter_value.encode()) if isinstance(parameter_value, str) else parameter_value
 
-        for index, parameter_tuple in enumerate(parameter_tuples):
-            name, value = parameter_tuple
-            value = quote(value.encode()) if isinstance(value, str) else value
+                if parameter_name == 'order_by':
+                    value = cls._convert_order_by(value)
 
-            if name == 'order_by':
-                value = cls._convert_order_by(value)
+                fragments.append(f'{parameter_name}={value}')
 
-            query_string += f'{name}={value}' if index == 0 else f'&{name}={value}'
-
-        return query_string
+        return '?' + '&'.join(fragments)
 
     @classmethod
     def _convert_order_by(cls, order_by: dict) -> str:
