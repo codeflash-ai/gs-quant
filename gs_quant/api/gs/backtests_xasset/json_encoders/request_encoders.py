@@ -27,22 +27,22 @@ def encode_request_object(data: Any):
     if isinstance(data, Instrument):
         return data.to_dict()
     if isinstance(data, tuple):
-        return tuple(encode_request_object(d) for d in data)
+        return tuple(map(encode_request_object, data))
 
 
 def legs_decoder(data: Any):
     if data is None:
         return None
     result = [Instrument.from_dict(d) for d in data]
-    names = set(getattr(i, 'name', None) for i in result)
+    names = set(getattr(i, "name", None) for i in result)
     name_idx = 0
     for i in result:
         if i.name is not None:
             continue
-        cur_name = 'leg_' + str(name_idx)
+        cur_name = "leg_" + str(name_idx)
         while cur_name in names:
             name_idx += 1
-            cur_name = 'leg_' + str(name_idx)
+            cur_name = "leg_" + str(name_idx)
         i.name = cur_name
         name_idx += 1
     return result
