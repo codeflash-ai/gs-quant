@@ -37,41 +37,60 @@ _logger = logging.getLogger(__name__)
 def get_default_pivots(cls: str, has_dates: bool, multi_measures: bool,
                        multi_scen: bool, simple_port: bool = None, ori_cols=None):
     if cls == 'MultipleScenarioResult':
+        # Fast path: Reduce conditional branching depth, tuple construction order unchanged
         return 'value', 'scenario', 'dates' if has_dates else None
+
     elif cls == 'MultipleRiskMeasureResult':
-        return 'value', ('risk_measure', 'scenario') if multi_scen else 'risk_measure', 'dates' if has_dates else None
+        # Fast path: Fewer branches, tuple construction order intact
+        return (
+            'value',
+            ('risk_measure', 'scenario') if multi_scen else 'risk_measure',
+            'dates' if has_dates else None
+        )
+
     elif cls == 'PortfolioRiskResult':
+        # Short-circuit check remains
         if ori_cols is None:
             raise ValueError('columns of dataframe required to get default pivots')
-        portfolio_names = list(filter(lambda x: 'portfolio_name_' in x, ori_cols))
-        port_and_inst_names = portfolio_names + ['instrument_name']
-        pivot_rules = [
-            # has_dates, multi_measures,  simple_port, multi_scen
-            # output: (value,index,columns)
-            [True, True, None, False, ('value', 'dates', port_and_inst_names + ['risk_measure'])],
-            [True, False, None, False, ('value', 'dates', port_and_inst_names)],
-            [False, False, False, False, ('value', portfolio_names, 'instrument_name')],
-            [False, None, None, False, ('value', port_and_inst_names, 'risk_measure')],
 
-            [True, True, None, True, ('value', 'dates', port_and_inst_names + ['risk_measure', 'scenario'])],
-            [True, False, None, True, ('value', 'dates', port_and_inst_names + ['scenario'])],
-            [False, True, None, True, ('value', port_and_inst_names, ['risk_measure', 'scenario'])],
-            [False, False, None, True, ('value', port_and_inst_names, 'scenario')],
+        # Use list comprehension for speed over filter+lambda
+        portfolio_names = [x for x in ori_cols if 'portfolio_name_' in x]
+        port_and_inst_names = portfolio_names + ['instrument_name']
+
+        # Precompute outputs
+        output_0 = ('value', 'dates', port_and_inst_names + ['risk_measure'])
+        output_1 = ('value', 'dates', port_and_inst_names)
+        output_2 = ('value', portfolio_names, 'instrument_name')
+        output_3 = ('value', port_and_inst_names, 'risk_measure')
+        output_4 = ('value', 'dates', port_and_inst_names + ['risk_measure', 'scenario'])
+        output_5 = ('value', 'dates', port_and_inst_names + ['scenario'])
+        output_6 = ('value', port_and_inst_names, ['risk_measure', 'scenario'])
+        output_7 = ('value', port_and_inst_names, 'scenario')
+
+        # Combine rules and outputs for faster access, keep as tuples to avoid unpack overhead
+        pivot_rules = [
+            (True,  True,  None, False, output_0),
+            (True,  False, None, False, output_1),
+            (False, False, False, False, output_2),
+            (False, None, None, False, output_3),
+            (True,  True,  None, True,  output_4),
+            (True,  False, None, True,  output_5),
+            (False, True,  None, True,  output_6),
+            (False, False, None, True,  output_7),
         ]
 
-        def match(rule_value, check_value) -> bool:
-            if rule_value is None:
-                return True
-            elif callable(rule_value):
-                return rule_value(check_value)
-            else:
-                return rule_value == check_value
+        # Inline match function: replaces closure with local logic (avoids function call overhead)
+        # All rule values are only None, bool, or callable (which does not occur in current setup).
 
-        for rule in pivot_rules:
-            [rule_has_dates, rule_multi_measures, rule_simple_port, rule_multi_scen, rule_output] = rule
-            if match(rule_has_dates, has_dates) and match(rule_multi_measures, multi_measures) and \
-                    match(rule_simple_port, simple_port) and match(rule_multi_scen, multi_scen):
+        # Direct loop using local variables for speed
+        for rule_has_dates, rule_multi_measures, rule_simple_port, rule_multi_scen, rule_output in pivot_rules:
+            if ((rule_has_dates is None or rule_has_dates == has_dates) and
+                (rule_multi_measures is None or rule_multi_measures == multi_measures) and
+                (rule_simple_port is None or rule_simple_port == simple_port) and
+                (rule_multi_scen is None or rule_multi_scen == multi_scen)):
                 return rule_output
+
+        # Output unchanged if not found
         return None, None, None
 
 
