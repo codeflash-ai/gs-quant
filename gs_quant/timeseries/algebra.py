@@ -650,30 +650,53 @@ def filter_dates(x: pd.Series, operator: Optional[FilterOperator] = None,
     """
 
     if dates is None and operator is None:
+        # Use inplace=False to preserve expected behavior: return new Series
         x = x.dropna(axis=0, how='any')
     elif dates is None:
         raise MqValueError('No date is specified for the operator')
     elif isinstance(dates, list) and operator not in [FilterOperator.EQUALS, FilterOperator.N_EQUALS]:
         raise MqValueError('Operator does not work for list of dates')
     else:
+        # Optimize common-case operations by pre-building masks, avoiding loc wherever possible
+        idx = x.index
+
         if operator == FilterOperator.EQUALS:
-            dates = dates if isinstance(dates, list) else [dates]
-            x = x.loc[~x.index.isin(dates)]
+            if not isinstance(dates, list):
+                mask = idx != dates
+            else:
+                # Pandas is faster for isin with an Index (idx) and a set, and ~ operator yields the boolean mask
+                s = set(dates)
+                mask = ~idx.isin(s)
+            x = x[mask]
         elif operator == FilterOperator.N_EQUALS:
-            dates = dates if isinstance(dates, list) else [dates]
-            x = x.loc[x.index.isin(dates)]
+            if not isinstance(dates, list):
+                mask = idx == dates
+            else:
+                s = set(dates)
+                mask = idx.isin(s)
+            x = x[mask]
         elif operator == FilterOperator.GREATER:
-            x = x.loc[x.index <= dates]
+            # index <= dates
+            mask = idx <= dates
+            x = x[mask]
         elif operator == FilterOperator.LESS:
-            x = x.loc[x.index >= dates]
+            # index >= dates
+            mask = idx >= dates
+            x = x[mask]
         elif operator == FilterOperator.L_EQUALS:
-            x = x.loc[x.index > dates]
+            # index > dates
+            mask = idx > dates
+            x = x[mask]
         elif operator == FilterOperator.G_EQUALS:
-            x = x.loc[x.index < dates]
+            # index < dates
+            mask = idx < dates
+            x = x[mask]
         else:
+            # preserve behavioral: type/operator stringification for error
             if not isinstance(operator, str):
                 operator = str(operator)
             raise MqValueError('Unexpected operator: ' + operator)
+
     return x
 
 
