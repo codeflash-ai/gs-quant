@@ -23,7 +23,6 @@ from abc import ABC, ABCMeta, abstractmethod
 from collections import namedtuple
 from dataclasses import Field, InitVar, MISSING, dataclass, field, fields, replace
 from enum import EnumMeta, Enum
-from functools import update_wrapper
 from typing import Iterable, Mapping, Optional, Union, Tuple
 
 import numpy as np
@@ -97,7 +96,9 @@ def handle_camel_case_args(cls):
 
         return init(self, *args, **normalised_kwargs)
 
-    cls.__init__ = update_wrapper(wrapper=wrapper, wrapped=init)
+    wrapper.__name__ = init.__name__
+    wrapper.__doc__ = init.__doc__
+    cls.__init__ = wrapper
 
     return cls
 
