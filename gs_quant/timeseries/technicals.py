@@ -426,13 +426,22 @@ def _freq_to_period(x: pd.Series, freq: Frequency = Frequency.YEAR):
     """
     if not isinstance(x.index, pd.DatetimeIndex):
         raise MqValueError("Series must have a pandas.DateTimeIndex.")
+
     pfreq = getattr(getattr(x, 'index', None), 'inferred_freq', None)
-    # Some older versions of statsmodels don't handle some of the newer pandas frequencies, so we manually adjust them
-    pfreq = 'MS' if pfreq in ('ME', 'M') else pfreq  # Convert Month[End] into MonthlyStart
-    pfreq = 'QS' if pfreq in ('QE-DEC', 'QE') else pfreq  # Convert Quarter[End] into QuarterlyStart
+
+    # Convert pandas legacy frequencies to format accepted by statsmodels
+    if pfreq == 'ME' or pfreq == 'M':
+        pfreq = 'MS'
+    elif pfreq == 'QE-DEC' or pfreq == 'QE':
+        pfreq = 'QS'
+
     period = None if pfreq is None else statsmodels.tsa.seasonal.freq_to_period(pfreq)
-    if period in [7, None]:  # daily
-        x = x.asfreq('D', method='ffill')
+
+    # Fast-path checks to avoid repeated x.asfreq conversions
+    if period in [7, None]:  # daily, fallback if inferred_freq fails
+        # Only call asfreq if index freq isn't already daily for perf
+        if pfreq != 'D':
+            x = x.asfreq('D', method='ffill')
         if freq == Frequency.YEAR:
             return x, 365
         elif freq == Frequency.QUARTER:
@@ -442,16 +451,33 @@ def _freq_to_period(x: pd.Series, freq: Frequency = Frequency.YEAR):
         else:
             return x, 7
     elif period == 5:  # business day
-        if freq == Frequency.YEAR:
-            return x.asfreq('D', method='ffill'), 365
-        if freq == Frequency.QUARTER:
-            return x.asfreq('D', method='ffill'), 91
-        elif freq == Frequency.MONTH:
-            return x.asfreq('D', method='ffill'), 30
+        if pfreq != 'B':
+            x_b = x.asfreq('B', method='ffill')
+        else:
+            x_b = x
+        asfreq_to_daily = False
+
+        # For non-WEEK / WEEKLY, convert to daily if necessary
+        if freq == Frequency.YEAR or freq == Frequency.QUARTER or freq == Frequency.MONTH:
+            # Only convert to daily if not already daily
+            if pfreq != 'D':
+                x = x.asfreq('D', method='ffill')
+            else:
+                x = x
+            if freq == Frequency.YEAR:
+                return x, 365
+            elif freq == Frequency.QUARTER:
+                return x, 91
+            elif freq == Frequency.MONTH:
+                return x, 30
+        # For WEEKLY, keep as business day freq
         else:  # freq == Frequency.WEEKLY:
-            return x.asfreq('B', method='ffill'), 5
+            return x_b, 5
+
     elif period == 52:  # weekly frequency
-        x = x.asfreq('W', method='ffill')
+        # Only call asfreq if not already weekly
+        if pfreq != 'W':
+            x = x.asfreq('W', method='ffill')
         if freq == Frequency.YEAR:
             return x, period
         elif freq == Frequency.QUARTER:
@@ -460,14 +486,18 @@ def _freq_to_period(x: pd.Series, freq: Frequency = Frequency.YEAR):
             return x, 4
         else:
             raise MqValueError(f'Frequency {freq.value} not compatible with series with frequency {pfreq}.')
+
     elif period == 12:  # monthly frequency
-        x = x.asfreq('ME', method='ffill')
+        # Only call asfreq if not already monthly end/start
+        if pfreq not in ('ME', 'M', 'MS'):
+            x = x.asfreq('ME', method='ffill')
         if freq == Frequency.YEAR:
             return x, period
         elif freq == Frequency.QUARTER:
             return x, 3
         else:
             raise MqValueError(f'Frequency {freq.value} not compatible with series with frequency {pfreq}.')
+
     return x, period
 
 
