@@ -1133,7 +1133,7 @@ class FutureMarket(Asset):
                  asset_class: Union[AssetClass, str],
                  name: str,
                  entity: Optional[Dict] = None):
-        if isinstance(asset_class, str):
+        if type(asset_class) is str:
             asset_class = get_enum_value(AssetClass, asset_class)
         Asset.__init__(self, id_, asset_class, name, entity=entity)
 
