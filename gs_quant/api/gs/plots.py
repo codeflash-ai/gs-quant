@@ -31,7 +31,8 @@ class GsPlotApi:
 
     @classmethod
     def get_chart(cls, chart_id: str) -> Chart:
-        return GsSession.current._get('/charts/{id}'.format(id=chart_id), cls=Chart)
+        # This method is already a single call; .format replaced with f-string for slight performance gain
+        return GsSession.current._get(f'/charts/{chart_id}', cls=Chart)
 
     @classmethod
     def create_chart(cls, chart: Chart) -> Chart:
@@ -50,8 +51,12 @@ class GsPlotApi:
     @classmethod
     def share_chart(cls, chart_id: str, users: Iterable):
         # endpoint silently discards tokens not prefixed with 'guid:' => can't be used for roles, groups, etc.
-        if any(map(lambda x: not x.startswith('guid:'), users)):
-            raise ValueError('Chart can only be shared with individual users via this method.')
+        # Optimization: avoid map/lambda/any; check all with a for loop and bail out early.
+        for x in users:
+            if not x.startswith('guid:'):
+                raise ValueError('Chart can only be shared with individual users via this method.')
+        # Use tuple(users) once for sharing, avoid rebuilding Iterator
+        users_tuple = tuple(users)
         chart = cls.get_chart(chart_id)
-        share = ChartShare(tuple(users), chart.version)
+        share = ChartShare(users_tuple, chart.version)
         return GsSession.current._post(f'/charts/{chart_id}/share', share, cls=Chart)
