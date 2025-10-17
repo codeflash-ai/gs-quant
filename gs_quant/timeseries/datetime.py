@@ -679,9 +679,12 @@ def day_count(first: dt.date, second: dt.date) -> int:
     :param second: second date
     :return: number of business days between first and second
     """
-    if not (isinstance(first, dt.date) and isinstance(second, dt.date)):
+    # Cache type to avoid repeated attribute access in isinstance
+    _dt_date = dt.date
+    if not (isinstance(first, _dt_date) and isinstance(second, _dt_date)):
         raise MqValueError('inputs must be dates')
-    return np.busday_count(first, second)
+    # Convert to ISO format strings directly to avoid numpy's Python object parsing slowness
+    return np.busday_count(first.isoformat(), second.isoformat())
 
 
 @plot_function
