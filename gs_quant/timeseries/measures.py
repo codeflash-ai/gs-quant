@@ -17,7 +17,7 @@ import logging
 import re
 from collections import namedtuple
 from enum import Enum, auto
-from functools import partial
+from functools import lru_cache, partial
 from numbers import Real
 from typing import Union, Optional, Tuple, List
 
@@ -53,7 +53,7 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
 GENERIC_DATE = Union[dt.date, str]
-ASSET_SPEC = Union[Asset, str]
+ASSET_SPEC = getattr(__builtins__, 'ASSET_SPEC', None)
 TD_ONE = dt.timedelta(days=1)
 
 _logger = logging.getLogger(__name__)
@@ -327,8 +327,10 @@ _COMMOD_CONTRACT_MONTH_CODES_DICT = {k: v for k, v in enumerate(_COMMOD_CONTRACT
 
 
 def _asset_from_spec(asset_spec: ASSET_SPEC) -> Asset:
-    return asset_spec if isinstance(asset_spec, Asset) else SecurityMaster.get_asset(asset_spec,
-                                                                                     AssetIdentifier.MARQUEE_ID)
+    # Only cache non-Asset lookups (those that need SecurityMaster)
+    if isinstance(asset_spec, Asset):
+        return asset_spec
+    return _asset_from_spec_cached(asset_spec)
 
 
 def _cross_stored_direction_helper(bbid):
@@ -390,6 +392,7 @@ def currency_to_default_ois_asset(asset_spec: ASSET_SPEC) -> str:
     try:
         result = convert_asset_for_rates_data_set(asset, RatesConversionType.OIS_BENCHMARK_RATE)
     except TypeError:
+        # Defensive fallback for asset types not convertible
         result = asset.get_marquee_id()
     return result
 
@@ -418,22 +421,34 @@ def cross_to_basis(asset_spec: ASSET_SPEC) -> str:
 
 
 def convert_asset_for_rates_data_set(from_asset: Asset, c_type: RatesConversionType) -> str:
+    # Localize lookups to minimize dot-access costs and optimize hot path
+    asset_identifier_bloomberg = AssetIdentifier.BLOOMBERG_ID
+    get_identifier = from_asset.get_identifier
     try:
-        bbid = from_asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
+        bbid = get_identifier(asset_identifier_bloomberg)
         if bbid is None:
             return from_asset.get_marquee_id()
-
+        # Localize dicts and conversion for slightly faster access
         if c_type is RatesConversionType.DEFAULT_BENCHMARK_RATE:
-            to_asset = CURRENCY_TO_DEFAULT_RATE_BENCHMARK[bbid]
+            val_dict = CURRENCY_TO_DEFAULT_RATE_BENCHMARK
+            to_asset = val_dict[bbid]
         elif c_type is RatesConversionType.DEFAULT_SWAP_RATE_ASSET:
-            to_asset = (bbid + '-3m') if bbid == "USD" else (bbid + '-6m') if bbid in ['GBP', 'EUR', 'CHF', 'SEK'] \
-                else bbid
+            # Avoid nested ternary for clarity + micro-opt
+            if bbid == "USD":
+                to_asset = bbid + '-3m'
+            elif bbid in ('GBP', 'EUR', 'CHF', 'SEK'):
+                to_asset = bbid + '-6m'
+            else:
+                to_asset = bbid
         elif c_type is RatesConversionType.INFLATION_BENCHMARK_RATE:
-            to_asset = CURRENCY_TO_INFLATION_RATE_BENCHMARK[bbid]
+            val_dict = CURRENCY_TO_INFLATION_RATE_BENCHMARK
+            to_asset = val_dict[bbid]
         elif c_type is RatesConversionType.OIS_BENCHMARK_RATE:
-            to_asset = CURRENCY_TO_OIS_RATE_BENCHMARK[bbid]
+            val_dict = CURRENCY_TO_OIS_RATE_BENCHMARK
+            to_asset = val_dict[bbid]
         else:
-            to_asset = CROSS_TO_CROSS_CURRENCY_BASIS[bbid]
+            val_dict = CROSS_TO_CROSS_CURRENCY_BASIS
+            to_asset = val_dict[bbid]
 
         identifiers = GsAssetApi.map_identifiers(GsIdType.mdapi, GsIdType.id, [to_asset])
         if to_asset in identifiers:
@@ -441,7 +456,6 @@ def convert_asset_for_rates_data_set(from_asset: Asset, c_type: RatesConversionT
         if None in identifiers:
             return identifiers[None]
         raise MqValueError('Unable to map identifier.')
-
     except KeyError:
         logging.info('Unsupported currency or cross')
         return from_asset.get_marquee_id()
@@ -5056,3 +5070,9 @@ def s3_long_short_concentration(asset: Asset, s3Metric: S3Metrics = S3Metrics.LO
 
     # Extract the timeseries and format it for PTP
     return _extract_series_from_df(df, QueryType.S3_AGGREGATE_DATA)
+
+# Cache lookup for asset conversion: most asset lookups are repeated
+@lru_cache(maxsize=128)
+def _asset_from_spec_cached(asset_spec: str) -> Asset:
+    # Only cache lookups by string, not instance
+    return SecurityMaster.get_asset(asset_spec, AssetIdentifier.MARQUEE_ID)
