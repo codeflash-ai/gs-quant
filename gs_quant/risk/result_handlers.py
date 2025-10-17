@@ -53,15 +53,40 @@ def __dataframe_handler(result: Iterable, mappings: tuple, risk_key: RiskKey, re
 
 def __dataframe_handler_unsorted(result: Iterable, mappings: tuple, date_cols: tuple, risk_key: RiskKey,
                                  request_id: Optional[str] = None) -> DataFrameWithInfo:
-    first_row = next(iter(result), None)
+    result_iter = iter(result)
+    first_row = next(result_iter, None)
     if first_row is None:
         return DataFrameWithInfo(risk_key=risk_key, request_id=request_id)
 
-    records = ([row.get(field_from) for field_to, field_from in mappings] for row in result)
-    df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
-    df.columns = [m[0] for m in mappings]
+    # Prepare the field_from extraction list and columns list only once
+    field_from_list = [field_from for field_to, field_from in mappings]
+    columns = [field_to for field_to, field_from in mappings]
+
+    # Pre-assemble all records using the known mappings. 
+    # Use itertools.chain for efficient prepending of first_row.
+    from itertools import chain
+
+    # This avoids the double iteration over result.
+    all_rows = chain((first_row,), result_iter)
+    records = ([row.get(field) for field in field_from_list] for row in all_rows)
+    
+    # Materialize records as a list for direct DataFrame construction (otherwise pandas may exhaust generator too early)
+    records_list = list(records)
+    df = DataFrameWithInfo(records_list, risk_key=risk_key, request_id=request_id)
+    df.columns = columns
+
     for dt_col in date_cols:
-        df[dt_col] = df[dt_col].map(lambda x: dt.datetime.strptime(x, '%Y-%m-%d').date() if isinstance(x, str) else x)
+        col_data = df[dt_col]
+        # Use fast path for "%Y-%m-%d" parsing
+        def parse_maybe(x):
+            if isinstance(x, str):
+                try:
+                    return __fast_strptime(x)
+                except Exception:
+                    return dt.datetime.strptime(x, '%Y-%m-%d').date()
+            return x
+        # Use Series.map (pandas vectorized) with local function
+        df[dt_col] = col_data.map(parse_maybe)
 
     return df
 
@@ -435,6 +460,12 @@ def market_handler(result: dict, risk_key: RiskKey, _instrument: InstrumentBase,
 def unsupported_handler(_result: dict, risk_key: RiskKey, _instrument: InstrumentBase,
                         request_id: Optional[str] = None) -> UnsupportedValue:
     return UnsupportedValue(risk_key, request_id=request_id)
+
+
+def __fast_strptime(date_str: str) -> dt.date:
+    # Local fast-path: bypass strptime machinery for fixed '%Y-%m-%d' format
+    # Assumes valid input
+    return dt.date(int(date_str[0:4]), int(date_str[5:7]), int(date_str[8:10]))
 
 
 result_handlers = {
