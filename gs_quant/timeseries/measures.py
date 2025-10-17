@@ -73,8 +73,9 @@ class ExtendedSeries(pd.Series):
         # Call the parent class's __finalize__ method
         super().__finalize__(other, method)
         # Copy custom attributes from the other DataFrame
-        if isinstance(other, ExtendedSeries) and hasattr(other, 'dataset_ids'):
-            self.dataset_ids = getattr(other, 'dataset_ids', None)
+        if isinstance(other, ExtendedSeries):
+            if 'dataset_ids' in other.__dict__:
+                self.dataset_ids = other.__dict__['dataset_ids']
         return self
 
 
