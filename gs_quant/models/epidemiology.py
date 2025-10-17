@@ -64,8 +64,9 @@ class SIR(CompartmentalModel):
         else:
             raise ValueError("Cannot recognize parameter input")
 
-        dSdt = - beta * s * i / N
-        dIdt = beta * s * i / N - gamma * i
+        infection_term = beta * s * i / N
+        dSdt = -infection_term
+        dIdt = infection_term - gamma * i
         dRdt = gamma * i
 
         return dSdt, dIdt, dRdt
@@ -132,8 +133,10 @@ class SEIR(CompartmentalModel):
         else:
             raise ValueError("Cannot recognize parameter input")
 
-        dSdt = -beta * s * i / N
-        dEdt = beta * s * i / N - sigma * e
+        beta_si_over_N = beta * s * i / N
+
+        dSdt = -beta_si_over_N
+        dEdt = beta_si_over_N - sigma * e
         dIdt = sigma * e - gamma * i
         dRdt = gamma * i
 
