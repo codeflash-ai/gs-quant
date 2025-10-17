@@ -97,32 +97,53 @@ def excess_returns(price_series: pd.Series, benchmark_or_rate: Union[Asset, Curr
 
 def _annualized_return(levels: pd.Series, rolling: Union[int, pd.DateOffset],
                        interpolation_method: Interpolate = Interpolate.NAN) -> pd.Series:
+    # Optimize by keeping lookups and function calls outside of inner loop
+    idx = levels.index
+    vals = levels.values
+    n = len(levels)
     if isinstance(rolling, pd.DateOffset):
-        starting = [tstamp - rolling for tstamp in levels.index]
-        levels = interpolate(levels, method=interpolation_method)
-        points = list(
-            map(lambda d, v, i: pow(v / levels.get(i, np.nan),
-                                    365.25 / (d - i).days) - 1,
-                levels.index[1:],
-                levels.values[1:], starting[1:]))
+        # Precompute shifted index outside of iteration
+        starting_idx = [tstamp - rolling for tstamp in idx]
+        levels_interp = interpolate(levels, method=interpolation_method)
+        idx1 = idx[1:]
+        vals1 = vals[1:]
+        starting_idx1 = starting_idx[1:]
+        # Use fast local lookups and list comprehension
+        result = [
+            pow(
+                v / levels_interp.get(i, np.nan),
+                365.25 / (d - i).days
+            ) - 1
+            for d, v, i in zip(idx1, vals1, starting_idx1)
+        ]
     else:
         if interpolation_method is not Interpolate.NAN:
             raise MqValueError(f'If w is not a relative date, method must be nan. You specified method: '
                                f'{interpolation_method.value}.')
-        starting = [0] * rolling
-        starting.extend([a for a in range(1, len(levels) - rolling + 1)])
-        points = list(
-            map(lambda d, v, i: pow(v / levels.iloc[i], 365.25 / (d - levels.index[i]).days) - 1, levels.index[1:],
-                levels.values[1:], starting[1:]))
-    points.insert(0, 0)
-    return pd.Series(points, index=levels.index)
+        # Avoid list(map(lambda ...)), prefer local index and variable access
+        result = []
+        for idx_j in range(1, n):
+            i = 0 if idx_j < rolling else idx_j - rolling + 1
+            v = vals[idx_j]
+            idx_i = idx[i]
+            vi = vals[i]
+            days = (idx[idx_j] - idx_i).days
+            point = pow(v / vi, 365.25 / days) - 1 if days != 0 else np.nan
+            result.append(point)
+    # Insert 0 at the first position (preserving behavior)
+    result.insert(0, 0)
+    return pd.Series(result, index=levels.index)
 
 
 def get_ratio_pure(er: pd.Series, w: Union[Window, int, str],
                    interpolation_method: Interpolate = Interpolate.NAN) -> pd.Series:
     w = normalize_window(er, w or None)  # continue to support 0 as an input for window
     ann_return = _annualized_return(er, w.w, interpolation_method=interpolation_method)
-    long_enough = (er.index[-1] - w.w) >= er.index[0] if isinstance(w.w, pd.DateOffset) else w.w < len(er)
+    # Avoid recomputation of er.index and length
+    if isinstance(w.w, pd.DateOffset):
+        long_enough = (er.index[-1] - w.w) >= er.index[0]
+    else:
+        long_enough = w.w < len(er)
     ann_vol = volatility(er, w).iloc[1:] if long_enough else volatility(er)
     result = ann_return / ann_vol * 100
     return apply_ramp(result, w)
@@ -532,7 +553,7 @@ def volatility(x: pd.Series, w: Union[Window, int, str] = Window(None, 0),
     Calculate rolling annualized realized volatility of a price series over a given window. Annual volatility of 20% is
     returned as 20.0:
 
-    :math:`Y_t = \\sqrt{\\frac{1}{N-1} \\sum_{i=t-w+1}^t (R_t - \\overline{R_t})^2} * \\sqrt{252} * 100`
+    :math:`Y_t = \sqrt{\frac{1}{N-1} \sum_{i=t-w+1}^t (R_t - \overline{R_t})^2} * \sqrt{252} * 100`
 
     where N is the number of observations in each rolling window :math:`w`, :math:`R_t` is the return on time
     :math:`t` based on *returns_type*
@@ -541,7 +562,7 @@ def volatility(x: pd.Series, w: Union[Window, int, str] = Window(None, 0),
     Type          Description
     ===========   =======================================================
     simple        Simple geometric change in asset prices:
-                  :math:`R_t = \\frac{X_t}{X_{t-1}} - 1`
+                  :math:`R_t = \frac{X_t}{X_{t-1}} - 1`
                   where :math:`X_t` is the asset price at time :math:`t`
     logarithmic   Natural logarithm of asset price changes:
                   :math:`R_t = log(X_t) - log(X_{t-1})`
@@ -551,9 +572,9 @@ def volatility(x: pd.Series, w: Union[Window, int, str] = Window(None, 0),
                   where :math:`X_t` is the asset price at time :math:`t`
     ===========   =======================================================
 
-    and :math:`\\overline{R_t}` is the mean value over the same window:
+    and :math:`\overline{R_t}` is the mean value over the same window:
 
-    :math:`\\overline{R_t} = \\frac{\\sum_{i=t-w+1}^{t} R_t}{N}`
+    :math:`\overline{R_t} = \frac{\sum_{i=t-w+1}^{t} R_t}{N}`
 
     If window is not provided, computes realized volatility over the full series
 
