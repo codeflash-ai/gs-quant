@@ -428,7 +428,7 @@ def day_count_fractions(
 
     Default is Actual/360 per ISDA specification:
 
-    :math:`Y_t = \frac{Days(t_{-1}, t)}{360}`
+    :math:`Y_t = rac{Days(t_{-1}, t)}{360}`
 
     For a full list of available conventions, see
     `Day Count Conventions <https://developer.gs.com/docs/gsquant/guides/Dates/1-day-count-conventions>`_.
@@ -447,19 +447,30 @@ def day_count_fractions(
     :func:`day` :func:`month` :func:`year`
 
     """
+    # Efficient handling of input date list
     if isinstance(dates, pd.Series):
-        date_list = list(dates.index)
+        date_index = dates.index
     else:
-        date_list = dates
+        date_index = dates
 
-    if len(date_list) < 2:
+    date_len = len(date_index)
+    if date_len < 2:
         return pd.Series(dtype=float)
 
-    start_dates = date_list[0:-1]
-    end_dates = date_list[1:len(date_list)]
+    # Use slicing and list comprehension for performance
+    start_dates = date_index[:-1]
+    end_dates = date_index[1:]
 
-    dcfs = map(lambda a, b: day_count_fraction(a, b, convention, frequency), start_dates, end_dates)
-    return pd.Series(data=[np.nan] + list(dcfs), index=date_list[0:len(date_list)])
+    # Preallocate numpy array and use list comprehension for speedup, avoiding intermediate list for start_dates/end_dates
+    dcfs = [day_count_fraction(a, b, convention, frequency) for a, b in zip(start_dates, end_dates)]
+
+    # Prepending np.nan efficiently
+    values = np.empty(date_len)
+    values[0] = np.nan
+    if dcfs:
+        values[1:] = dcfs
+
+    return pd.Series(data=values, index=date_index)
 
 
 @plot_function
