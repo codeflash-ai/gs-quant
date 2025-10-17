@@ -132,8 +132,10 @@ class SEIR(CompartmentalModel):
         else:
             raise ValueError("Cannot recognize parameter input")
 
-        dSdt = -beta * s * i / N
-        dEdt = beta * s * i / N - sigma * e
+        beta_si_over_N = beta * s * i / N
+
+        dSdt = -beta_si_over_N
+        dEdt = beta_si_over_N - sigma * e
         dIdt = sigma * e - gamma * i
         dRdt = gamma * i
 
@@ -206,7 +208,9 @@ def switch(t: float, T: float, eta: float = 0, xi: float = 0.1, nu: float = 0) -
     :param nu: optional - the shift of the exponential decrease
     :return:
     """
-    return eta + (1 - eta) / (1 + np.exp(xi * (t - T - nu)))
+    # No substantial optimization possible here with the constraints and NumPy; tiny win only by directly assigning
+    exp_val = np.exp(xi * (t - T - nu))
+    return eta + (1 - eta) / (1 + exp_val)
 
 
 class SEIRCM(CompartmentalModel):
@@ -352,25 +356,52 @@ class SEIRCMAgeStratified(CompartmentalModel):
 
         # y is of dimension (6 * K) x 1, where the first K are 'S', next K are 'E', and so on for each age group...
         assert len(y) == 6 * K, f'Error: SEIRCM states not organized into {K} age groups!'
-        dydt = [0] * len(y)
 
-        def epsilon(k):  # case fatality rate per age group
-            return parameters[f'epsilon_{k}'].value
+        # Avoid repeated list access in loop by slicing, and precompute frequently used values.
+        S = y[0:K]
+        E = y[K:2*K]
+        I = y[2*K:3*K]
+        R = y[3*K:4*K]
 
-        N = sum(y[:4 * K])  # sum(S) + sum(E) + sum(I) + sum(R) where sum is over age groups
-        I_total = sum(y[2 * K:3 * K])  # total number of infectious people across age groups
-        s, e, i = lambda k: y[k], lambda k: y[K + k], lambda k: y[2 * K + k]
+        # Precompute N (sum of S, E, I, R), and total infectious I_total
+        N = sum(S) + sum(E) + sum(I) + sum(R)
+        I_total = sum(I)
+
+        # Collect epsilons ahead for indexing, as their access is expensive in a loop
+        epsilons = [parameters[f'epsilon_{k}'].value for k in range(K)]
 
         # if T_quarantine is 0, we are not considering effect of quarantine policy so scale factor is fixed at 1
         quarantine_factor = switch(t, T_quarantine, eta=eta) if T_quarantine else 1
 
+        # Precompute for repeated use
+        qb = quarantine_factor * beta
+
+        # Use list pre-allocation plus direct index assignment for maximal efficiency
+        dydt = [0] * (6 * K)
+
         for k in range(K):
-            dydt[k] = -(quarantine_factor * beta) * s(k) * I_total / N  # susceptible -> exposed
-            dydt[K + k] = (quarantine_factor * beta) * s(k) * I_total / N - sigma * e(k)  # exposed -> infected
-            dydt[2 * K + k] = sigma * e(k) - gamma * i(k)  # infected -> removed
-            dydt[3 * K + k] = (1 - epsilon(k)) * gamma * i(k)  # -> cumulative recovered (from removed)
-            dydt[4 * K + k] = sigma * e(k)  # -> cumulative recorded cases (from infected)
-            dydt[5 * K + k] = epsilon(k) * gamma * i(k)  # -> cumulative fatalities (from removed)
+            s_k = S[k]
+            e_k = E[k]
+            i_k = I[k]
+            epsilon_k = epsilons[k]
+
+            # susceptible -> exposed
+            dydt[k] = -qb * s_k * I_total / N
+
+            # exposed -> infected
+            dydt[K + k] = qb * s_k * I_total / N - sigma * e_k
+
+            # infected -> removed
+            dydt[2 * K + k] = sigma * e_k - gamma * i_k
+
+            # -> cumulative recovered (from removed)
+            dydt[3 * K + k] = (1 - epsilon_k) * gamma * i_k
+
+            # -> cumulative recorded cases (from infected)
+            dydt[4 * K + k] = sigma * e_k
+
+            # -> cumulative fatalities (from removed)
+            dydt[5 * K + k] = epsilon_k * gamma * i_k
 
         return dydt
 
