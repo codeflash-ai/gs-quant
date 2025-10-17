@@ -44,20 +44,51 @@ def __interpolate_step(x: pd.Series, dates: pd.Series = None) -> pd.Series:
     if x.empty:
         raise MqValueError('Cannot perform step interpolation on an empty series')
 
-    first_date = pd.Timestamp(dates.index[0]) if isinstance(x.index[0], pd.Timestamp) else dates.index[0]
+    first_index = x.index[0]
+    if isinstance(first_index, pd.Timestamp):
+        first_date = pd.Timestamp(dates.index[0])
+    else:
+        first_date = dates.index[0]
 
-    # locate previous valid date or take first value from series
-    prev = x.index[0] if first_date < x.index[0] else x.index[x.index.get_indexer([first_date], method='pad')]
+    # Find previous valid date or take first value from series
+    if first_date < x.index[0]:
+        prev = x.index[0]
+    else:
+        prev_idx = x.index.get_indexer([first_date], method='pad')[0]
+        prev = x.index[prev_idx]
 
     current = x[prev]
 
-    curve = x.align(dates, 'right', )[0]  # only need values from dates
+    # Align once and access underlying numpy arrays for fast vectorized step-filling
+    curve_aligned, _ = x.align(dates, 'right', )
+    # Copy for mutating, avoid triggering SettingWithCopyWarning and for performance
+    curve = curve_aligned.copy()
+    curve_values = curve.values
 
-    for knot in curve.items():
-        if np.isnan(knot[1]):
-            curve[knot[0]] = current
+    # The main optimization: vectorized forward-filling
+    # Find non-NaN indices, replace NaNs with previous non-NaN value
+    mask = np.isnan(curve_values)
+    if mask.any():
+        # Find indices where values are not nan
+        valid = ~mask
+        # np.maximum.accumulate creates groups of valid==True
+        if valid.any():
+            # Index in curve_values of last observed valid
+            idx = np.where(valid, np.arange(len(valid)), 0)
+            np.maximum.accumulate(idx, out=idx)
+            # Use take to broadcast last known valid value into NaN positions
+            curve_values[mask] = curve_values[idx][mask]
+            curve.values[:] = curve_values
+            # We must ensure the very first value(s) before the first known value
+            # are set to 'current' as the reference implementation did.
+            first_valid_pos = valid.argmax()
+            if first_valid_pos > 0:
+                curve_values[:first_valid_pos] = current
+                curve.values[:] = curve_values
         else:
-            current = knot[1]
+            # If all values are np.nan, fill with 'current'
+            curve.values[:] = current
+
     return curve
 
 
