@@ -489,7 +489,8 @@ def abs_(x: pd.Series) -> pd.Series:
     :func:`exp` :func:`sqrt`
 
     """
-    return abs(x)
+    # Use pd.Series.abs() directly for potential performance improvement on Pandas objects
+    return x.abs() if isinstance(x, pd.Series) else abs(x)
 
 
 @plot_function
