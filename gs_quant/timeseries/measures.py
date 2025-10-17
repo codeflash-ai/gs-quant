@@ -17,7 +17,7 @@ import logging
 import re
 from collections import namedtuple
 from enum import Enum, auto
-from functools import partial
+from functools import lru_cache, partial
 from numbers import Real
 from typing import Union, Optional, Tuple, List
 
@@ -327,8 +327,10 @@ _COMMOD_CONTRACT_MONTH_CODES_DICT = {k: v for k, v in enumerate(_COMMOD_CONTRACT
 
 
 def _asset_from_spec(asset_spec: ASSET_SPEC) -> Asset:
-    return asset_spec if isinstance(asset_spec, Asset) else SecurityMaster.get_asset(asset_spec,
-                                                                                     AssetIdentifier.MARQUEE_ID)
+    # Utilize LRU cache only for str asset_spec, avoids excessive expensive calls in batch or repeated usage
+    if isinstance(asset_spec, Asset):
+        return asset_spec
+    return _cached_asset_lookup(asset_spec)
 
 
 def _cross_stored_direction_helper(bbid):
@@ -424,16 +426,28 @@ def convert_asset_for_rates_data_set(from_asset: Asset, c_type: RatesConversionT
             return from_asset.get_marquee_id()
 
         if c_type is RatesConversionType.DEFAULT_BENCHMARK_RATE:
-            to_asset = CURRENCY_TO_DEFAULT_RATE_BENCHMARK[bbid]
+            to_asset = CURRENCY_TO_DEFAULT_RATE_BENCHMARK.get(bbid)
+            if to_asset is None:
+                raise KeyError
         elif c_type is RatesConversionType.DEFAULT_SWAP_RATE_ASSET:
-            to_asset = (bbid + '-3m') if bbid == "USD" else (bbid + '-6m') if bbid in ['GBP', 'EUR', 'CHF', 'SEK'] \
-                else bbid
+            if bbid == "USD":
+                to_asset = bbid + '-3m'
+            elif bbid in {'GBP', 'EUR', 'CHF', 'SEK'}:
+                to_asset = bbid + '-6m'
+            else:
+                to_asset = bbid
         elif c_type is RatesConversionType.INFLATION_BENCHMARK_RATE:
-            to_asset = CURRENCY_TO_INFLATION_RATE_BENCHMARK[bbid]
+            to_asset = CURRENCY_TO_INFLATION_RATE_BENCHMARK.get(bbid)
+            if to_asset is None:
+                raise KeyError
         elif c_type is RatesConversionType.OIS_BENCHMARK_RATE:
-            to_asset = CURRENCY_TO_OIS_RATE_BENCHMARK[bbid]
+            to_asset = CURRENCY_TO_OIS_RATE_BENCHMARK.get(bbid)
+            if to_asset is None:
+                raise KeyError
         else:
-            to_asset = CROSS_TO_CROSS_CURRENCY_BASIS[bbid]
+            to_asset = CROSS_TO_CROSS_CURRENCY_BASIS.get(bbid)
+            if to_asset is None:
+                raise KeyError
 
         identifiers = GsAssetApi.map_identifiers(GsIdType.mdapi, GsIdType.id, [to_asset])
         if to_asset in identifiers:
@@ -5056,3 +5070,9 @@ def s3_long_short_concentration(asset: Asset, s3Metric: S3Metrics = S3Metrics.LO
 
     # Extract the timeseries and format it for PTP
     return _extract_series_from_df(df, QueryType.S3_AGGREGATE_DATA)
+
+# Use LRU cache to limit redundant asset creation for repeated asset_specs
+@lru_cache(maxsize=64)
+def _cached_asset_lookup(asset_spec: str):
+    # Called only for str input
+    return SecurityMaster.get_asset(asset_spec, AssetIdentifier.MARQUEE_ID)
