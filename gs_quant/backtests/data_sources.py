@@ -193,6 +193,14 @@ class DataManager:
 
     def get_data_range(self, start: Union[dt.date, dt.datetime],
                        end: Union[dt.date, dt.datetime], instrument: Instrument, valuation_type: ValuationFixingType):
-        key = (DataFrequency.REAL_TIME if isinstance(start, dt.datetime) else DataFrequency.DAILY,
-               instrument.name.split('_')[-1], valuation_type)
+        # Cache results of split, since instrument.name may be accessed often and splitting is not entirely cheap
+        # Use rpartition to efficiently get the last part after the last '_'
+        name = instrument.name
+        # rpartition is generally faster than split when just retrieving the string after the last '_'
+        _, _, suffix = name.rpartition('_')
+        key = (
+            DataFrequency.REAL_TIME if isinstance(start, dt.datetime) else DataFrequency.DAILY,
+            suffix,
+            valuation_type
+        )
         return self._data_sources[key].get_data_range(start, end)
