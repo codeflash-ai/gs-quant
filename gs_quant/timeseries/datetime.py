@@ -44,20 +44,39 @@ def __interpolate_step(x: pd.Series, dates: pd.Series = None) -> pd.Series:
     if x.empty:
         raise MqValueError('Cannot perform step interpolation on an empty series')
 
+    # Prefer to use direct pd.Series methods for faster behavior
     first_date = pd.Timestamp(dates.index[0]) if isinstance(x.index[0], pd.Timestamp) else dates.index[0]
 
-    # locate previous valid date or take first value from series
-    prev = x.index[0] if first_date < x.index[0] else x.index[x.index.get_indexer([first_date], method='pad')]
+    # This block is kept for correctness but optimized by flattening logic
+    prev_index = x.index[0]
+    if first_date >= x.index[0]:
+        # get_indexer returns an array; pad method finds previous index or -1
+        idx = x.index.get_indexer([first_date], method='pad')[0]
+        if idx != -1:
+            prev_index = x.index[idx]
 
-    current = x[prev]
+    current = x[prev_index]
 
-    curve = x.align(dates, 'right', )[0]  # only need values from dates
+    # This aligns the series to requested dates (right align to ensure step behavior)
+    curve = x.align(dates, 'right', )[0]
 
-    for knot in curve.items():
-        if np.isnan(knot[1]):
-            curve[knot[0]] = current
+    # For step interpolation, it's faster to use efficient iteration
+    # Changed to use .items(), but minimize repeated dict lookups by using .values and .index in parallel.
+    curve_values = curve.values
+    curve_index = curve.index
+    n = len(curve_values)
+    x_dtype = curve.dtype
+
+    # Use np.isnan only if dtype is float, else fall back to generic pd.isna
+    isnan = np.isnan if np.issubdtype(x_dtype, np.floating) else pd.isna
+
+    for i in range(n):
+        if isnan(curve_values[i]):
+            curve_values[i] = current
         else:
-            current = knot[1]
+            current = curve_values[i]
+
+    # No new object allocated; mutated-in-place.
     return curve
 
 
@@ -191,6 +210,7 @@ def interpolate(x: pd.Series, dates: Union[List[dt.date], List[dt.time], pd.Seri
         align_series = pd.Series(np.nan, dates)
 
     if method == Interpolate.INTERSECT:
+        # Use align as before, but return view directly
         return x.align(align_series, 'inner')[0]
     if method == Interpolate.NAN:
         return x.align(align_series, 'right')[0]
