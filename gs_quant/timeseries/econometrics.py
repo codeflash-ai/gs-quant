@@ -60,10 +60,11 @@ class SharpeAssets(Enum):
 
 def excess_returns_pure(price_series: pd.Series, spot_curve: pd.Series) -> pd.Series:
     curve, bench_curve = align(price_series, spot_curve, Interpolate.INTERSECT)
-
-    e_returns = [curve.iloc[0]]
-    for i in range(1, len(curve)):
-        multiplier = 1 + curve.iloc[i] / curve.iloc[i - 1] - bench_curve.iloc[i] / bench_curve.iloc[i - 1]
+    curve_vals = curve.values
+    bench_curve_vals = bench_curve.values
+    e_returns = [curve_vals[0]]
+    for i in range(1, len(curve_vals)):
+        multiplier = 1 + curve_vals[i] / curve_vals[i - 1] - bench_curve_vals[i] / bench_curve_vals[i - 1]
         e_returns.append(e_returns[-1] * multiplier)
     return pd.Series(e_returns, index=curve.index)
 
@@ -71,11 +72,15 @@ def excess_returns_pure(price_series: pd.Series, spot_curve: pd.Series) -> pd.Se
 def excess_returns(price_series: pd.Series, benchmark_or_rate: Union[Asset, Currency, float], *,
                    day_count_convention=DayCountConvention.ACTUAL_360) -> pd.Series:
     if isinstance(benchmark_or_rate, float):
-        er = [price_series.iloc[0]]
-        for j in range(1, len(price_series)):
-            fraction = day_count_fraction(price_series.index[j - 1], price_series.index[j], day_count_convention)
-            er.append(er[-1] + price_series.iloc[j] - price_series.iloc[j - 1] * (1 + benchmark_or_rate * fraction))
-        return pd.Series(er, index=price_series.index)
+        # Pre-extract values for faster access in loops
+        price_vals = price_series.values
+        idx = price_series.index
+        n = len(price_series)
+        er = [price_vals[0]]
+        for j in range(1, n):
+            fraction = day_count_fraction(idx[j - 1], idx[j], day_count_convention)
+            er.append(er[-1] + price_vals[j] - price_vals[j - 1] * (1 + benchmark_or_rate * fraction))
+        return pd.Series(er, index=idx)
 
     if isinstance(benchmark_or_rate, Currency):
         try:
