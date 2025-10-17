@@ -71,11 +71,17 @@ def excess_returns_pure(price_series: pd.Series, spot_curve: pd.Series) -> pd.Se
 def excess_returns(price_series: pd.Series, benchmark_or_rate: Union[Asset, Currency, float], *,
                    day_count_convention=DayCountConvention.ACTUAL_360) -> pd.Series:
     if isinstance(benchmark_or_rate, float):
-        er = [price_series.iloc[0]]
-        for j in range(1, len(price_series)):
-            fraction = day_count_fraction(price_series.index[j - 1], price_series.index[j], day_count_convention)
-            er.append(er[-1] + price_series.iloc[j] - price_series.iloc[j - 1] * (1 + benchmark_or_rate * fraction))
-        return pd.Series(er, index=price_series.index)
+        ps_values = price_series.values
+        ps_index = price_series.index
+        n = len(ps_values)
+        # Pre-allocate array for better memory and speed
+        er = np.empty(n, dtype=float)
+        er[0] = ps_values[0]
+        for j in range(1, n):
+            fraction = day_count_fraction(ps_index[j - 1], ps_index[j], day_count_convention)
+            # Avoid Python operator chaining by splitting operation for clarity & performance
+            er[j] = er[j - 1] + ps_values[j] - ps_values[j - 1] * (1 + benchmark_or_rate * fraction)
+        return pd.Series(er, index=ps_index)
 
     if isinstance(benchmark_or_rate, Currency):
         try:
@@ -121,9 +127,22 @@ def _annualized_return(levels: pd.Series, rolling: Union[int, pd.DateOffset],
 def get_ratio_pure(er: pd.Series, w: Union[Window, int, str],
                    interpolation_method: Interpolate = Interpolate.NAN) -> pd.Series:
     w = normalize_window(er, w or None)  # continue to support 0 as an input for window
+
+    # The original code computes 'long_enough', which checks, for DateOffset window,
+    # if enough data is present to allow dropping the first row of annualized volatility
+    if isinstance(w.w, pd.DateOffset):
+        min_date = er.index[0] + w.w
+        long_enough = (er.index[-1] - w.w) >= er.index[0]
+    else:
+        long_enough = w.w < len(er)
     ann_return = _annualized_return(er, w.w, interpolation_method=interpolation_method)
-    long_enough = (er.index[-1] - w.w) >= er.index[0] if isinstance(w.w, pd.DateOffset) else w.w < len(er)
-    ann_vol = volatility(er, w).iloc[1:] if long_enough else volatility(er)
+    # Avoid unnecessary copying; pandas iloc returns view when possible
+    ann_vol = volatility(er, w)
+    if long_enough:
+        ann_vol = ann_vol.iloc[1:]
+        result_index = ann_return.index
+    else:
+        result_index = ann_return.index
     result = ann_return / ann_vol * 100
     return apply_ramp(result, w)
 
