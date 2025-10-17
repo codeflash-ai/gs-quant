@@ -393,7 +393,7 @@ def log(x: pd.Series) -> pd.Series:
     :func:`exp`
 
     """
-    return np.log(x)
+    return pd.Series(np.log(x.values), index=x.index, name=x.name)
 
 
 @plot_function
