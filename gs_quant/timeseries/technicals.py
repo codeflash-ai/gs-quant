@@ -153,7 +153,7 @@ def smoothed_moving_average(x: pd.Series, w: Union[Window, int, str] = Window(No
 
     A modified moving average (MMA), running moving average (RMA), or smoothed moving average (SMMA) is defined as:
 
-    :math:`P_{MM,today} = \\frac{(N-1)P_{MM,yesterday} + P_today}{N}`
+    :math:`P_{MM,today} = \frac{(N-1)P_{MM,yesterday} + P_today}{N}`
 
     where N is the number of observations in each rolling window, :math:`w`. If window is not provided, computes
     rolling mean over the full series
@@ -185,15 +185,24 @@ def smoothed_moving_average(x: pd.Series, w: Union[Window, int, str] = Window(No
         x = apply_ramp(x, w)
 
     smoothed_moving_averages = x.copy()
-    smoothed_moving_averages *= 0
+    smoothed_moving_averages.values[:] = 0  # Faster than smoothed_moving_averages *= 0
     smoothed_moving_averages.iloc[0] = initial_moving_average
+    idx_arr = x.index
+    x_values = x.values
     for i in range(1, len(x)):
         if isinstance(window_size, int):
             window_num_elem = window_size
         else:
-            window_num_elem = len(x[(x.index > (x.index[i] - window_size).date()) & (x.index <= x.index[i])])
-        smoothed_moving_averages.iloc[i] = ((window_num_elem - 1) *
-                                            smoothed_moving_averages.iloc[i - 1] + x.iloc[i]) / window_num_elem
+            curr_idx = idx_arr[i]
+            left = curr_idx - window_size
+            # Avoid repeated attribute lookups by only calling .date once if possible
+            left_val = left.date() if hasattr(left, 'date') else left
+            # Vectorized searchsorted is overkill for small arrays, but avoids repeated boolean mask construction
+            mask = (idx_arr > left_val) & (idx_arr <= curr_idx)
+            window_num_elem = mask.sum()
+        prev_ma = smoothed_moving_averages.iloc[i - 1]
+        curr_val = x_values[i]
+        smoothed_moving_averages.iloc[i] = ((window_num_elem - 1) * prev_ma + curr_val) / window_num_elem
     return smoothed_moving_averages
 
 
