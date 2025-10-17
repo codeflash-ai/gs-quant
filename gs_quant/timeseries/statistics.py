@@ -268,13 +268,13 @@ def mean(x: Union[pd.Series, List[pd.Series]], w: Union[Window, int, str] = Wind
 
     If a timeseries is provided:
 
-    :math:`R_t = \\frac{\\sum_{i=t-w+1}^{t} X_i}{N}`
+    :math:`R_t = \frac{\sum_{i=t-w+1}^{t} X_i}{N}`
 
     where :math:`N` is the number of observations in each rolling window, :math:`w`.
 
     If an array of timeseries is provided:
 
-    :math:`R_t = \\frac{\\sum_{i=t-w+1}^{t} {\\sum_{j=1}^{n}} X_{ij}}{N}`
+    :math:`R_t = \frac{\sum_{i=t-w+1}^{t} {\sum_{j=1}^{n}} X_{ij}}{N}`
 
     where :math:`n` is the number of series, and :math:`N` is the number of observations in each rolling window,
     :math:`w`.
@@ -298,16 +298,39 @@ def mean(x: Union[pd.Series, List[pd.Series]], w: Union[Window, int, str] = Wind
         x = pd.concat(x, axis=1)
     w = normalize_window(x, w)
     assert x.index.is_monotonic_increasing, "series index is monotonic increasing"
+    # If DataOffset window, use rolling_offset
     if isinstance(w.w, pd.DateOffset):
         if isinstance(x, pd.Series):
             values = rolling_offset(x, w.w, np.nanmean, 'mean')
         else:
-            values = [np.nanmean(x.loc[(x.index > (idx - w.w).date()) & (x.index <= idx)]) for idx in x.index]
+            # Use vectorized DataFrame rolling for mean if possible
+            # However, for DateOffset, must iterate (no pandas direct support)
+            idx = x.index
+            values = np.empty(len(idx))
+            arr = x.values
+            for i, ix in enumerate(idx):
+                mask = (idx > (ix - w.w).date()) & (idx <= ix) if not np.issubdtype(idx.dtype, np.datetime64) \
+                    else (idx > (ix - w.w)) & (idx <= ix)
+                # Using nanmean over all values in frame per date
+                vals = arr[mask] if mask.any() else np.nan
+                if mask.any():
+                    values[i] = np.nanmean(vals)
+                else:
+                    values[i] = np.nan
+            values = pd.Series(values, index=idx, dtype=np.float64)
     else:
         if isinstance(x, pd.Series):
-            values = x.rolling(w.w, 0).mean()  # faster than slicing in Python
+            values = x.rolling(w.w, 0).mean()
         else:
-            values = [np.nanmean(x.iloc[max(idx - w.w + 1, 0): idx + 1]) for idx in range(0, len(x))]
+            # Use numpy nansum/nanmean for improved speed over explicit Python slicing
+            arr = x.values
+            n, m = arr.shape
+            out = np.empty(n)
+            for idx in range(n):
+                lo = max(idx - w.w + 1, 0)
+                segment = arr[lo:idx + 1]
+                out[idx] = np.nanmean(segment)
+            values = pd.Series(out, index=x.index, dtype=np.float64)
     return apply_ramp(pd.Series(values, index=x.index, dtype=np.dtype(float)), w)
 
 
