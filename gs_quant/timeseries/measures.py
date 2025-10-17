@@ -17,7 +17,7 @@ import logging
 import re
 from collections import namedtuple
 from enum import Enum, auto
-from functools import partial
+from functools import lru_cache, partial
 from numbers import Real
 from typing import Union, Optional, Tuple, List
 
@@ -327,8 +327,10 @@ _COMMOD_CONTRACT_MONTH_CODES_DICT = {k: v for k, v in enumerate(_COMMOD_CONTRACT
 
 
 def _asset_from_spec(asset_spec: ASSET_SPEC) -> Asset:
-    return asset_spec if isinstance(asset_spec, Asset) else SecurityMaster.get_asset(asset_spec,
-                                                                                     AssetIdentifier.MARQUEE_ID)
+    # Use cache for string asset specifications to reduce expensive lookups
+    if isinstance(asset_spec, Asset):
+        return asset_spec
+    return _cached_asset_from_spec(asset_spec)
 
 
 def _cross_stored_direction_helper(bbid):
@@ -5056,3 +5058,8 @@ def s3_long_short_concentration(asset: Asset, s3Metric: S3Metrics = S3Metrics.LO
 
     # Extract the timeseries and format it for PTP
     return _extract_series_from_df(df, QueryType.S3_AGGREGATE_DATA)
+
+
+@lru_cache(maxsize=128)
+def _cached_asset_from_spec(asset_spec: str) -> Asset:
+    return SecurityMaster.get_asset(asset_spec, AssetIdentifier.MARQUEE_ID)
