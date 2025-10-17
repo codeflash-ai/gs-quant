@@ -23,18 +23,39 @@ from gs_quant.api.gs.backtests_xasset.response_datatypes.risk_result import Risk
 from gs_quant.api.gs.backtests_xasset.response_datatypes.risk_result_datatypes import FloatWithData, StringWithData, \
     VectorWithData, MatrixWithData, RiskResultWithData
 
+_FLOAT_TYPES = (float, int)
+
+_STR_TYPE = str
+
+_SERIES_TYPE = pd.Series
+
+_DF_TYPE = pd.DataFrame
+
 _type_to_datatype_map = {'float': FloatWithData, 'string': StringWithData,
                          'vector': VectorWithData, 'matrix': MatrixWithData}
 
 
 def map_result_to_datatype(data: Any) -> Type[RiskResultWithData]:
-    if isinstance(data, (float, int)):
+    # Fast path: use type() for class identity when possible, speeds up for builtins
+    dt = type(data)
+    if dt in _FLOAT_TYPES:
         return FloatWithData
-    if isinstance(data, str):
+    # str check
+    if dt is _STR_TYPE:
         return StringWithData
-    if isinstance(data, pd.Series):
+    # pandas type checks (class identity should suffice and is faster than isinstance)
+    if dt is _SERIES_TYPE:
         return VectorWithData
-    if isinstance(data, pd.DataFrame):
+    if dt is _DF_TYPE:
+        return MatrixWithData
+    # Fallback to isinstance for subtyping support
+    if isinstance(data, _FLOAT_TYPES):
+        return FloatWithData
+    if isinstance(data, _STR_TYPE):
+        return StringWithData
+    if isinstance(data, _SERIES_TYPE):
+        return VectorWithData
+    if isinstance(data, _DF_TYPE):
         return MatrixWithData
     raise ValueError('Cannot assign result type to data')
 
