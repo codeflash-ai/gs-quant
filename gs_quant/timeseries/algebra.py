@@ -360,7 +360,10 @@ def exp(x: pd.Series) -> pd.Series:
     :func:`log`
 
     """
-    return np.exp(x)
+    values = x.values
+    if isinstance(values, np.ndarray):
+        return pd.Series(np.exp(values), index=x.index, name=x.name)
+    return x.apply(np.exp)
 
 
 @plot_function
