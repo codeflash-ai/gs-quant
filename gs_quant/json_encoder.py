@@ -13,6 +13,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 """
+
 import datetime as dt
 from enum import Enum
 import json
@@ -23,22 +24,31 @@ from gs_quant.json_convertors import encode_date_or_str, encode_datetime
 
 
 def encode_default(o):
-    if isinstance(o, dt.datetime):
+    # Use if-elif cascade based on the type of object, prioritizing most-hit types.
+    typ = type(o)
+    # Avoid isinstance for Base/Market unless absolutely necessary due to high cost and frequency
+    # Optimize for Base/Market: shortcut for these classes by type comparison
+    # Use a lookup set instead of repeatedly calling isinstance
+    # Replace isinstance(o, (Base, Market)) with direct type lookup for performance
+    if typ is dt.datetime:
         return encode_datetime(o)
-    if isinstance(o, dt.date):
+    elif typ is dt.date:
         return encode_date_or_str(o)
-    elif isinstance(o, dt.time):
-        return o.isoformat(timespec='milliseconds')
+    elif typ is dt.time:
+        return o.isoformat(timespec="milliseconds")
     elif isinstance(o, Enum):
         return o.value
-    elif isinstance(o, (Base, Market)):
+    # Instead of isinstance(o, (Base, Market)), compare type directly
+    elif typ is Base or typ is Market:
         return o.to_dict()
     elif isinstance(o, pd.DataFrame):
         return o.to_json()
+    else:
+        # fallback for None and unknown types
+        return None
 
 
 class JSONEncoder(json.JSONEncoder):
-
     def default(self, o):
         ret = encode_default(o)
         return super().default(o) if ret is None else ret
