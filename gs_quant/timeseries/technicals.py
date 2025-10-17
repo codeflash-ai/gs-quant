@@ -426,13 +426,37 @@ def _freq_to_period(x: pd.Series, freq: Frequency = Frequency.YEAR):
     """
     if not isinstance(x.index, pd.DatetimeIndex):
         raise MqValueError("Series must have a pandas.DateTimeIndex.")
-    pfreq = getattr(getattr(x, 'index', None), 'inferred_freq', None)
-    # Some older versions of statsmodels don't handle some of the newer pandas frequencies, so we manually adjust them
-    pfreq = 'MS' if pfreq in ('ME', 'M') else pfreq  # Convert Month[End] into MonthlyStart
-    pfreq = 'QS' if pfreq in ('QE-DEC', 'QE') else pfreq  # Convert Quarter[End] into QuarterlyStart
-    period = None if pfreq is None else statsmodels.tsa.seasonal.freq_to_period(pfreq)
-    if period in [7, None]:  # daily
-        x = x.asfreq('D', method='ffill')
+
+    # Cache attribute lookups
+    index = x.index
+    pfreq = getattr(index, 'inferred_freq', None)
+
+    # Map frequency string adjustments
+    if pfreq is not None:
+        if pfreq in ('ME', 'M'):
+            pfreq = 'MS'
+        elif pfreq in ('QE-DEC', 'QE'):
+            pfreq = 'QS'
+
+    # statsmodels freq_to_period can be slow, cache values for common pfreq
+    _FREQ_PERIOD_MAP = {
+        'D': 7, 'B': 5, 'W': 52, 'MS': 12, 'QS': 4, 'ME': 12, 'M': 12, 'Q': 4,
+        'A': 1, 'AS': 1, 'Y': 1  # just in case, not directly used here
+    }
+
+    # Fast path for known pfreq, fallback to statsmodels for less common ones
+    if pfreq is not None and pfreq in _FREQ_PERIOD_MAP:
+        period = _FREQ_PERIOD_MAP[pfreq]
+    elif pfreq is not None:
+        period = statsmodels.tsa.seasonal.freq_to_period(pfreq)
+    else:
+        period = None
+
+    # Avoid repeated asfreq calls except strictly necessary for output/behavior guarantees
+    # Main select column
+    if period in (7, None):  # daily
+        # Only perform asfreq if not already daily-regular
+        x = x if pfreq == 'D' else x.asfreq('D', method='ffill')
         if freq == Frequency.YEAR:
             return x, 365
         elif freq == Frequency.QUARTER:
@@ -442,30 +466,38 @@ def _freq_to_period(x: pd.Series, freq: Frequency = Frequency.YEAR):
         else:
             return x, 7
     elif period == 5:  # business day
+        # If already business-regular, do not apply asfreq (still need to convert to daily for monthly/quarter cases)
         if freq == Frequency.YEAR:
-            return x.asfreq('D', method='ffill'), 365
+            x_new = x.asfreq('D', method='ffill')
+            return x_new, 365
         if freq == Frequency.QUARTER:
-            return x.asfreq('D', method='ffill'), 91
+            x_new = x.asfreq('D', method='ffill')
+            return x_new, 91
         elif freq == Frequency.MONTH:
-            return x.asfreq('D', method='ffill'), 30
-        else:  # freq == Frequency.WEEKLY:
-            return x.asfreq('B', method='ffill'), 5
+            x_new = x.asfreq('D', method='ffill')
+            return x_new, 30
+        else:  # freq == Frequency.WEEKLY
+            # Only perform asfreq if not already business-regular
+            x_new = x if pfreq == 'B' else x.asfreq('B', method='ffill')
+            return x_new, 5
     elif period == 52:  # weekly frequency
-        x = x.asfreq('W', method='ffill')
+        # Only perform asfreq if not already weekly-regular
+        x_new = x if pfreq == 'W' else x.asfreq('W', method='ffill')
         if freq == Frequency.YEAR:
-            return x, period
+            return x_new, period
         elif freq == Frequency.QUARTER:
-            return x, 13
+            return x_new, 13
         elif freq == Frequency.MONTH:
-            return x, 4
+            return x_new, 4
         else:
             raise MqValueError(f'Frequency {freq.value} not compatible with series with frequency {pfreq}.')
     elif period == 12:  # monthly frequency
-        x = x.asfreq('ME', method='ffill')
+        # Only perform asfreq if not already month-end-regular
+        x_new = x if pfreq in {'ME', 'M'} else x.asfreq('ME', method='ffill')
         if freq == Frequency.YEAR:
-            return x, period
+            return x_new, period
         elif freq == Frequency.QUARTER:
-            return x, 3
+            return x_new, 3
         else:
             raise MqValueError(f'Frequency {freq.value} not compatible with series with frequency {pfreq}.')
     return x, period
