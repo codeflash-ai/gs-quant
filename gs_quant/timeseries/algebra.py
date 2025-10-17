@@ -829,4 +829,9 @@ def geometrically_aggregate(series: pd.Series) -> pd.Series:
 
     Used to aggregate daily returns when expressed as weights
     """
-    return series.add(1).cumprod() - 1
+    # Use in-place operations to reduce memory usage and overhead.
+    # Note: add(1, inplace=False) is equivalent to series + 1, but we can perform inplace arithmetics for performance.
+    series_plus_one = series.values + 1
+    result = pd.Series(series_plus_one).cumprod().values - 1
+    # Maintain the index and dtype as in the original code
+    return pd.Series(result, index=series.index, dtype=series.dtype)
