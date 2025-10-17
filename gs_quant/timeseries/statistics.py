@@ -877,7 +877,7 @@ def percentiles(x: pd.Series, y: Optional[pd.Series] = None, w: Union[Window, in
     Calculate `percentile rank <https://en.wikipedia.org/wiki/Percentile_rank>`_ of :math:`y` in the sample distribution
     of :math:`x` over a rolling window of length :math:`w`:
 
-    :math:`R_t = \\frac{\\sum_{i=t-N+1}^{t}{[X_i<{Y_t}]}+0.5\\sum_{i=t-N+1}^{t}{[X_i={Y_t}]}}{N}\\times100\\%`
+    :math:`R_t = \frac{\sum_{i=t-N+1}^{t}{[X_i<{Y_t}]}+0.5\sum_{i=t-N+1}^{t}{[X_i={Y_t}]}}{N}\times100\%`
 
     Where :math:`N` is the number of observations in a rolling window. If :math:`y` is not provided (or is NULL),
     calculates percentiles of :math:`x` over its historical values. If window length :math:`w` is not provided, uses an
@@ -909,20 +909,40 @@ def percentiles(x: pd.Series, y: Optional[pd.Series] = None, w: Union[Window, in
     if isinstance(w.w, int) and w.w > len(x):
         return pd.Series(dtype=float)
 
-    res = pd.Series(dtype=np.dtype(float))
     convert_to_date = not isinstance(x.index, pd.DatetimeIndex)
 
     if isinstance(w.w, pd.DateOffset):
-        for idx, val in y.items():
-            sample = x.loc[(x.index > ((idx - w.w).date() if convert_to_date else idx - w.w)) & (x.index <= idx)]
-            res.loc[idx] = percentileofscore(sample, val, kind='mean')
+        res_dict = {}
+        # Precompute date offsets for efficiency
+        date_offsets = [
+            ((idx - w.w).date() if convert_to_date else idx - w.w, idx)
+            for idx in y.index
+        ]
+        for (start, end), val in zip(date_offsets, y.values):
+            sample = x.loc[(x.index > start) & (x.index <= end)]
+            res_dict[end] = percentileofscore(sample, val, kind='mean')
+        res = pd.Series(res_dict)
     elif not y.empty:
         min_periods = 0 if isinstance(w.r, pd.DateOffset) else w.r
-        rolling_window = x[:y.index[-1]].rolling(w.w, min_periods)
-        percentile_on_x_index = rolling_window.apply(lambda a: percentileofscore(a, y[a.index[-1]:].iloc[0],
-                                                                                 kind="mean"))
+        rolling_window = x[:y.index[-1]].rolling(w.w, min_periods=min_periods)
+        # Use numpy arrays for faster access
+        values_y = y.values
+        indices_y = y.index
+
+        # Vectorized: get last value for the current window from y
+        def get_percentile(arr, window_idx):
+            val = values_y[window_idx]
+            return percentileofscore(arr, val, kind='mean')
+
+        # Map y index to positional indices for efficient lookup
+        idx_map = {idx: i for i, idx in enumerate(indices_y)}
+        percentile_on_x_index = rolling_window.apply(
+            lambda arr: get_percentile(arr, idx_map[arr.index[-1]]) if arr.index[-1] in idx_map else np.nan
+        )
         joined_index = pd.concat([x, y], axis=1).index
         res = percentile_on_x_index.reindex(joined_index, method="ffill")[y.index]
+    else:
+        res = pd.Series(dtype=float)
     return apply_ramp(res, w)
 
 
