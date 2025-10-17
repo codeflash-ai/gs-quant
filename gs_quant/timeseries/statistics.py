@@ -52,10 +52,9 @@ except ImportError:
 
         start = 0
         for i in range(1, size):
-            for j in range(start, i + 1):
-                if pd.Timestamp(index[j]) > index[i] - offset:
-                    start = j
-                    break
+            cutoff = index[i] - offset
+            while start < i and pd.Timestamp(index[start]) <= cutoff:
+                start += 1
             section = values[start:i + 1]
             results[i] = np.std(section[section == section], ddof=1)
         return pd.Series(results, index=index, dtype=np.double)
@@ -507,12 +506,12 @@ def std(x: pd.Series, w: Union[Window, int, str] = Window(None, 0)) -> pd.Series
     Provides `unbiased estimator <https://en.wikipedia.org/wiki/Unbiased_estimation_of_standard_deviation>`_ of sample
     `standard deviation <https://en.wikipedia.org/wiki/Standard_deviation>`_ over a rolling window:
 
-    :math:`R_t = \\sqrt{\\frac{1}{N-1} \\sum_{i=t-w+1}^t (X_i - \\overline{X_t})^2}`
+    :math:`R_t = \sqrt{\frac{1}{N-1} \sum_{i=t-w+1}^t (X_i - \overline{X_t})^2}`
 
-    where :math:`N` is the number of observations in each rolling window, :math:`w`, and :math:`\\overline{X_t}` is the
+    where :math:`N` is the number of observations in each rolling window, :math:`w`, and :math:`\overline{X_t}` is the
     mean value over the same window:
 
-    :math:`\\overline{X_t} = \\frac{\\sum_{i=t-w+1}^{t} X_i}{N}`
+    :math:`\overline{X_t} = \frac{\sum_{i=t-w+1}^{t} X_i}{N}`
 
     If window is not provided, computes standard deviation over the full series
 
