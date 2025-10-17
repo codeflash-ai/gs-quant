@@ -214,11 +214,21 @@ class GsReportApi:
                                     start_date: dt.date = None,
                                     end_date: dt.date = None,
                                     unit: str = None) -> dict:
-
-        query_string = urllib.parse.urlencode(
-            dict(filter(lambda item: item[1] is not None,
-                        dict(factor=factor, factorCategory=factor_category,
-                             currency=currency, startDate=start_date, endDate=end_date, unit=unit).items())))
+        # Build query parameters efficiently without intermediate dict/filter
+        params = []
+        if factor is not None:
+            params.append(('factor', factor))
+        if factor_category is not None:
+            params.append(('factorCategory', factor_category))
+        if currency is not None:
+            params.append(('currency', currency))
+        if start_date is not None:
+            params.append(('startDate', start_date))
+        if end_date is not None:
+            params.append(('endDate', end_date))
+        if unit is not None:
+            params.append(('unit', unit))
+        query_string = urllib.parse.urlencode(params)
 
         GsSession.current.api_version = "v2"
         url = f'/factor/risk/{risk_report_id}/views?{query_string}'
