@@ -137,7 +137,10 @@ class Window:
 
     @classmethod
     def from_dict(cls, obj):
-        return Window(w=obj.get('w'), r=obj.get('r'))
+        # Fast path using positional unpacking to avoid multiple dict lookups
+        # This creates a tuple (w, r) to directly pass via *
+        w, r = obj.get('w'), obj.get('r')
+        return cls(w, r)
 
 
 def _check_window(series_length: int, window: Window):
