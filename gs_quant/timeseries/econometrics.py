@@ -793,10 +793,35 @@ def max_drawdown(x: pd.Series, w: Union[Window, int, str] = Window(None, 0)) -> 
     w = normalize_window(x, w)
     if isinstance(w.w, pd.DateOffset):
         if pd.api.types.is_datetime64_dtype(x.index):
-            scores = pd.Series([x[idx] / x.loc[(x.index > (idx - w.w)) & (x.index <= idx)].max() - 1
-                                for idx in x.index], index=x.index)
-            result = pd.Series([scores.loc[(scores.index > (idx - w.w)) & (scores.index <= idx)].min()
-                                for idx in scores.index], index=scores.index)
+            # Vectorized rolling-window drawdown using numpy search for O(n) performance
+            idx_values = x.index.values
+            x_values = x.values
+            n = len(x)
+
+            # Find the window start for each index, using np.searchsorted for O(n log n)
+            offset = w.w
+            window_starts = np.empty(n, dtype=np.intp)
+            shifted_datetimes = pd.Series(x.index - offset, index=x.index).values
+
+            # searchsorted requires monotonic increasing index
+            for i in range(n):
+                window_starts[i] = np.searchsorted(idx_values, shifted_datetimes[i], side='right')
+
+            # Compute rolling max for each window
+            rolling_max = np.empty(n)
+            for i in range(n):
+                rolling_max[i] = x_values[window_starts[i]:i+1].max() if window_starts[i] <= i else np.nan
+
+            scores = pd.Series(np.where(rolling_max != 0, x_values / rolling_max - 1, np.nan), index=x.index)
+
+            # Now, for each index, compute the rolling min of score over window
+            # Use the same logic as above.
+            scores_values = scores.values
+            min_drawdown = np.empty(n)
+            for i in range(n):
+                min_drawdown[i] = scores_values[window_starts[i]:i+1].min() if window_starts[i] <= i else np.nan
+
+            result = pd.Series(min_drawdown, index=x.index)
         else:
             raise TypeError('Please pass in list of dates as index')
     else:
