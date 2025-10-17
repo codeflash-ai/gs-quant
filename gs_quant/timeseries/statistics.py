@@ -683,7 +683,9 @@ def _zscore(x):
     if x.size == 1:
         return 0
 
-    return stats.zscore(x, ddof=1)[-1]
+    mean = np.mean(x)
+    std = np.std(x, ddof=1)
+    return (x[-1] - mean) / std
 
 
 @plot_function
