@@ -623,8 +623,8 @@ def union(x: List[pd.Series]) -> pd.Series:
 
     """
     if len(x):
-        res = pd.Series(dtype='float64', index=x[0].index)
-        for series in x:
+        res = x[0]
+        for series in x[1:]:
             res = res.combine_first(series)
     else:
         res = pd.Series(dtype='float64')
