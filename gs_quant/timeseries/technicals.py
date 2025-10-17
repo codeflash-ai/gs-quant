@@ -473,11 +473,77 @@ def _freq_to_period(x: pd.Series, freq: Frequency = Frequency.YEAR):
 
 def _seasonal_decompose(x: pd.Series, method: SeasonalModel = SeasonalModel.ADDITIVE,
                         freq: Frequency = Frequency.YEAR):
-    x, period = _freq_to_period(x, freq)
-    if x.shape[0] < 2 * period:
+    # Inlining _freq_to_period for minor overhead reduction and to avoid attribute accesses and function call overhead.
+    # Carefully preserves all original logic, variable names, and output.
+    index = x.index
+    if not isinstance(index, pd.DatetimeIndex):
+        raise MqValueError("Series must have a pandas.DateTimeIndex.")
+    pfreq = getattr(index, 'inferred_freq', None)
+    # Manual frequency adjustment block
+    pfreq = 'MS' if pfreq in ('ME', 'M') else pfreq
+    pfreq = 'QS' if pfreq in ('QE-DEC', 'QE') else pfreq
+    period = None if pfreq is None else statsmodels.tsa.seasonal.freq_to_period(pfreq)
+
+    orig_x = x
+    # Direct logic replication, but we minimize pd.Series copies and 'asfreq' calls
+    if period in [7, None]:  # daily
+        if freq == Frequency.YEAR:
+            x = x.asfreq('D', method='ffill') if x.index.freqstr != 'D' else x
+            period_out = 365
+        elif freq == Frequency.QUARTER:
+            x = x.asfreq('D', method='ffill') if x.index.freqstr != 'D' else x
+            period_out = 91
+        elif freq == Frequency.MONTH:
+            x = x.asfreq('D', method='ffill') if x.index.freqstr != 'D' else x
+            period_out = 30
+        else:
+            x = x.asfreq('D', method='ffill') if x.index.freqstr != 'D' else x
+            period_out = 7
+    elif period == 5:  # business day
+        if freq == Frequency.YEAR:
+            x = x.asfreq('D', method='ffill') if x.index.freqstr != 'D' else x
+            period_out = 365
+        elif freq == Frequency.QUARTER:
+            x = x.asfreq('D', method='ffill') if x.index.freqstr != 'D' else x
+            period_out = 91
+        elif freq == Frequency.MONTH:
+            x = x.asfreq('D', method='ffill') if x.index.freqstr != 'D' else x
+            period_out = 30
+        else:  # freq == Frequency.WEEKLY:
+            x = x.asfreq('B', method='ffill') if x.index.freqstr != 'B' else x
+            period_out = 5
+    elif period == 52:  # weekly frequency
+        if x.index.freqstr != 'W':
+            x = x.asfreq('W', method='ffill')
+        if freq == Frequency.YEAR:
+            period_out = period
+        elif freq == Frequency.QUARTER:
+            period_out = 13
+        elif freq == Frequency.MONTH:
+            period_out = 4
+        else:
+            raise MqValueError(f'Frequency {freq.value} not compatible with series with frequency {pfreq}.')
+    elif period == 12:  # monthly frequency
+        if x.index.freqstr not in ('ME', 'M'):
+            x = x.asfreq('ME', method='ffill')
+        if freq == Frequency.YEAR:
+            period_out = period
+        elif freq == Frequency.QUARTER:
+            period_out = 3
+        else:
+            raise MqValueError(f'Frequency {freq.value} not compatible with series with frequency {pfreq}.')
+    else:
+        period_out = period
+
+    # Use values directly from above; no need to set 'x, period' here as in original logic
+    if x.shape[0] < 2 * period_out:
         # Replace ValueError in seasonal_decompose with more descriptive error
         raise MqValueError(f"Series must have two complete cycles to be analyzed. Series has only {x.shape[0]} dpts.")
-    decompose_obj = statsmodels.tsa.seasonal.seasonal_decompose(x, period=period, model=method.value)
+
+    # Avoid repeated attribute lookup and variable indirection: use method.value only here
+    # Critical: seasonal_decompose dominates call time, so supplying minimal-inference Series can help
+    # Try to avoid unnecessary object creation, and use view if possible (but .asfreq never copies if freq matches)
+    decompose_obj = statsmodels.tsa.seasonal.seasonal_decompose(x, period=period_out, model=method.value)
     return decompose_obj
 
 
