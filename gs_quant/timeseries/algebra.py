@@ -599,22 +599,22 @@ def filter_(x: pd.Series, operator: Optional[FilterOperator] = None, value: Opti
         raise MqValueError('No value is specified for the operator')
     else:
         if operator == FilterOperator.EQUALS:
-            remove = x == value
+            mask = x != value
         elif operator == FilterOperator.GREATER:
-            remove = x > value
+            mask = x <= value
         elif operator == FilterOperator.LESS:
-            remove = x < value
+            mask = x >= value
         elif operator == FilterOperator.L_EQUALS:
-            remove = x <= value
+            mask = x > value
         elif operator == FilterOperator.G_EQUALS:
-            remove = x >= value
+            mask = x < value
         elif operator == FilterOperator.N_EQUALS:
-            remove = x != value
+            mask = x == value
         else:
             if not isinstance(operator, str):
                 operator = str(operator)
             raise MqValueError('Unexpected operator: ' + operator)
-        x = x.drop(x[remove].index)
+        x = x[mask]
     return x
 
 
