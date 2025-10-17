@@ -443,16 +443,19 @@ def change(x: pd.Series) -> pd.Series:
 
 def _get_annualization_factor(x):
     prev_idx = x.index[0]
-    distances = []
 
-    for idx, value in x.iloc[1:].items():
-        d = (idx - prev_idx).days
-        if d == 0:
-            raise MqValueError('multiple data points on same date')
-        distances.append(d)
-        prev_idx = idx
+    # Optimize by using numpy arrays for days calculation, and pandas fast lookup
+    # Build a numpy array of datetime-like index values
+    indices = x.index.to_numpy()
+    if indices.shape[0] < 2:
+        raise MqValueError('Not enough data points to infer annualization factor')
 
-    average_distance = np.average(distances)
+    # Calculate day differences in a vectorized way
+    diffs = np.diff(indices.astype('datetime64[D]').astype('int'))
+    if np.any(diffs == 0):
+        raise MqValueError('multiple data points on same date')
+    average_distance = np.mean(diffs)
+
     if average_distance < 2.1:
         factor = AnnualizationFactor.DAILY
     elif 6 <= average_distance < 8:
