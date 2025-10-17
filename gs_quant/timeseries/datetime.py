@@ -551,12 +551,18 @@ def append(series: List[pd.Series]) -> pd.Series:
     """
     if not len(series):
         return pd.Series(dtype='float64')
-    res = series[0].copy()
+    if len(series) == 1:
+        return series[0].copy()
+    res = [series[0]]
     for i in range(1, len(series)):
         cur = series[i]
-        start = res.index[-1]
-        res = pd.concat([res, cur.loc[cur.index > start]])
-    return res
+        start = res[-1].index[-1]
+        mask = cur.index > start
+        if mask.any():
+            res.append(cur[mask])
+    if len(res) == 1:
+        return res[0].copy()
+    return pd.concat(res)
 
 
 @plot_function
