@@ -530,11 +530,12 @@ class SectorConstraint:
         self.__unit = value
 
     def to_dict(self):
+        is_decimal = self.__unit == OptimizationConstraintUnit.DECIMAL
         return {
             'type': 'Sector',
-            'name': self.sector_name,
-            'min': self.minimum * 100 if self.unit == OptimizationConstraintUnit.DECIMAL else self.minimum,
-            'max': self.maximum * 100 if self.unit == OptimizationConstraintUnit.DECIMAL else self.maximum
+            'name': self.__sector_name,
+            'min': self.__minimum * 100 if is_decimal else self.__minimum,
+            'max': self.__maximum * 100 if is_decimal else self.__maximum
         }
 
     @classmethod
