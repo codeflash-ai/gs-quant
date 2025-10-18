@@ -565,19 +565,20 @@ class SectorConstraint:
         >>>                   {"sector": "Finance", "minimum": 0, "maximum": 5, "unit": "Percent"}])
         >>>     )
         """
-        sector_constraints = pd.DataFrame(sector_constraints) \
-            if isinstance(sector_constraints, list) else sector_constraints
+        if isinstance(sector_constraints, list):
+            sector_constraints = pd.DataFrame.from_records(sector_constraints)
 
         missing_columns = [col for col in ['sector', 'minimum', 'maximum', 'unit']
                            if col not in sector_constraints.columns]
         if missing_columns:
             raise MqValueError(f"The input is missing required columns: {', '.join(missing_columns)}")
-        sector_constraints_as_records = sector_constraints.to_dict(orient='records')
 
-        return [cls(sector_name=row.get('sector'),
-                    minimum=row.get('minimum'),
-                    maximum=row.get('maximum'),
-                    unit=OptimizationConstraintUnit(row.get('unit'))) for row in sector_constraints_as_records]
+        # Use itertuples for faster iteration instead of to_dict('records')
+        return [cls(sector_name=row.sector,
+                    minimum=row.minimum,
+                    maximum=row.maximum,
+                    unit=OptimizationConstraintUnit(row.unit)) 
+                for row in sector_constraints.itertuples(index=False)]
 
 
 class IndustryConstraint:
