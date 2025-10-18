@@ -39,6 +39,10 @@ from gs_quant.target.assets import FieldFilterMap
 from gs_quant.target.reports import Report
 from gs_quant.tracing import Tracer
 
+_fn_cache_lock = threading.Lock()
+
+_fallback_cache = None
+
 _logger = logging.getLogger(__name__)
 IdList = Union[Tuple[str, ...], List]
 ENABLE_ASSET_CACHING = 'GSQ_SEC_MASTER_CACHE'
@@ -69,24 +73,34 @@ class AssetCache:
 def get_default_cache() -> AssetCache:
     ttl = 30  # seconds
 
+    # Minor memory win: mutate args/kwargs copies instead of always calling hashkey even for "unchanged" cases
     def in_memory_key_fn(session, *args, **kwargs):
-        args = [tuple(x) if isinstance(x, list) else x for x in args]  # tuples are hashable
-        for k, v in kwargs.items():
-            if isinstance(v, list):
-                kwargs[k] = tuple(v)
+        # Fast-path: don't create new objects unless needed
+        args = tuple(tuple(x) if isinstance(x, list) else x for x in args)
+        if any(isinstance(v, list) for v in kwargs.values()):
+            # only copy if required for modification
+            kw = kwargs.copy()
+            for k, v in kw.items():
+                if isinstance(v, list):
+                    kw[k] = tuple(v)
+            key = cachetools.keys.hashkey(session, *args, **kw)
+        else:
+            key = cachetools.keys.hashkey(session, *args, **kwargs)
+        return key
 
-        k = cachetools.keys.hashkey(session, *args, **kwargs)
-        return k
-
-    return AssetCache(cache=InMemoryApiRequestCache(1024, ttl),
-                      ttl=ttl,
-                      construct_key_fn=in_memory_key_fn)
+    return AssetCache(
+        cache=InMemoryApiRequestCache(1024, ttl),
+        ttl=ttl,
+        construct_key_fn=in_memory_key_fn
+    )
 
 
 def _cached(fn):
-    _fn_cache_lock = threading.Lock()
-    # short-term cache to avoid retrieving the same data several times in succession
-    fallback_cache: AssetCache = get_default_cache()
+    # Use static fallback cache so only one instance is created per process, not per-decorator
+    global _fallback_cache
+    if _fallback_cache is None:
+        _fallback_cache = get_default_cache()
+    fallback_cache: AssetCache = _fallback_cache
 
     @wraps(fn)
     def wrapper(cls, *args, **kwargs):
