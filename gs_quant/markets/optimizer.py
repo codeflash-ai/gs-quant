@@ -582,11 +582,13 @@ class SectorConstraint:
 
 class IndustryConstraint:
 
-    def __init__(self,
-                 industry_name: str,
-                 minimum: float = 0,
-                 maximum: float = 100,
-                 unit: OptimizationConstraintUnit = OptimizationConstraintUnit.PERCENT):
+    def __init__(
+        self,
+        industry_name: str,
+        minimum: float = 0,
+        maximum: float = 100,
+        unit: OptimizationConstraintUnit = OptimizationConstraintUnit.PERCENT
+    ):
         """
         Constrain notional held in any particular GICS Industry in the resulting optimization
 
@@ -595,7 +597,8 @@ class IndustryConstraint:
         :param maximum: maximum
         :param unit: the unit in which the min and max values are passed in with (defaults to percent)
         """
-        if unit not in [OptimizationConstraintUnit.PERCENT, OptimizationConstraintUnit.DECIMAL]:
+        # Avoid recreating list on every init, use tuple for faster lookup
+        if unit not in (OptimizationConstraintUnit.PERCENT, OptimizationConstraintUnit.DECIMAL):
             raise MqValueError('Industry constraints can only be set by percent or decimal.')
         self.__industry_name = industry_name
         self.__minimum = minimum
@@ -637,11 +640,21 @@ class IndustryConstraint:
         self.__unit = value
 
     def to_dict(self):
+        # Move lookup OptimizationConstraintUnit.DECIMAL to local variable for speed
+        unit = self.__unit
+        decimal_unit = OptimizationConstraintUnit.DECIMAL
+        if unit is decimal_unit:
+            min_val = self.__minimum * 100
+            max_val = self.__maximum * 100
+        else:
+            min_val = self.__minimum
+            max_val = self.__maximum
+        # Directly use private attributes for fastest access
         return {
             'type': 'Industry',
-            'name': self.industry_name,
-            'min': self.minimum * 100 if self.unit == OptimizationConstraintUnit.DECIMAL else self.minimum,
-            'max': self.maximum * 100 if self.unit == OptimizationConstraintUnit.DECIMAL else self.maximum
+            'name': self.__industry_name,
+            'min': min_val,
+            'max': max_val
         }
 
     @classmethod
@@ -685,6 +698,23 @@ class IndustryConstraint:
                     minimum=row.get('minimum'),
                     maximum=row.get('maximum'),
                     unit=OptimizationConstraintUnit(row.get('unit'))) for row in industry_constraints_as_records]
+
+    @property
+    def industry_name(self):
+        # Direct reference of private attribute for O(1) access
+        return self.__industry_name
+
+    @property
+    def minimum(self):
+        return self.__minimum
+
+    @property
+    def maximum(self):
+        return self.__maximum
+
+    @property
+    def unit(self):
+        return self.__unit
 
 
 class FactorConstraint:
