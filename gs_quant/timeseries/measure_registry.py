@@ -13,9 +13,12 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 """
+
 import re
 
 from gs_quant.errors import MqError
+
+_non_word_re = re.compile(r"[^\w]")
 
 registry = {}
 
@@ -31,19 +34,36 @@ class MultiMeasure:
         fns = self.measure_map.get(asset_class, ())
 
         def canonicalize(word):
-            pruned = re.sub(r"[^\w]", "", word)
-            return pruned.casefold()
+            return _non_word_re.sub("", word).casefold()
 
         canonicalized = canonicalize(asset_type.value)
 
         for fn in fns:
-            if (fn.asset_type is None or canonicalized in map(lambda x: canonicalize(x.value), fn.asset_type)) \
-                    and (fn.asset_type_excluded is None or canonicalized not in
-                         map(lambda x: canonicalize(x.value), fn.asset_type_excluded)):
-                return fn
+            if fn.asset_type is not None:
+                found = False
+                for x in fn.asset_type:
+                    if canonicalize(x.value) == canonicalized:
+                        found = True
+                        break
+                if not found:
+                    continue
 
-        raise MqError("No measure {} defined for asset class {} and type {}".format(self.display_name, asset_class,
-                                                                                    asset_type))
+            if fn.asset_type_excluded is not None:
+                excluded = False
+                for x in fn.asset_type_excluded:
+                    if canonicalize(x.value) == canonicalized:
+                        excluded = True
+                        break
+                if excluded:
+                    continue
+
+            return fn
+
+        raise MqError(
+            "No measure {} defined for asset class {} and type {}".format(
+                self.display_name, asset_class, asset_type
+            )
+        )
 
     def __call__(self, asset, *args, **kwargs):
         fn = self.get_fn(asset)
@@ -51,7 +71,9 @@ class MultiMeasure:
 
     def register(self, function):
         for asset_class in function.asset_class:
-            self.measure_map[asset_class] = self.measure_map.get(asset_class, ()) + (function, )
+            self.measure_map[asset_class] = self.measure_map.get(asset_class, ()) + (
+                function,
+            )
 
 
 def register_measure(fn):
