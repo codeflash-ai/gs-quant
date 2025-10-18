@@ -25,6 +25,8 @@ from gs_quant.datetime.date import prev_business_date, location_to_tz_mapping
 from gs_quant.target.data import MarketDataCoordinate as __MarketDataCoordinate, \
     MarketDataCoordinateValue as __MarketDataCoordinateValue
 
+_pricing_context = None
+
 
 def historical_risk_key(risk_key: RiskKey) -> RiskKey:
     market = LocationOnlyMarket(risk_key.market.location)
@@ -38,8 +40,12 @@ def market_location(location: Optional[PricingLocation] = None) -> PricingLocati
     :param location: optional PricingLocation
     :return: PricingLocation
     """
-    from .core import PricingContext
-    default = PricingContext.current.market_data_location
+    global _pricing_context
+    if _pricing_context is None:
+        from .core import PricingContext
+        _pricing_context = PricingContext
+
+    default = _pricing_context.current.market_data_location
 
     if location is None:
         return default or PricingLocation.LDN
