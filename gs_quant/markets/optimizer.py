@@ -586,7 +586,7 @@ class IndustryConstraint:
                  industry_name: str,
                  minimum: float = 0,
                  maximum: float = 100,
-                 unit: OptimizationConstraintUnit = OptimizationConstraintUnit.PERCENT):
+                 unit: 'OptimizationConstraintUnit' = 'OptimizationConstraintUnit.PERCENT'):
         """
         Constrain notional held in any particular GICS Industry in the resulting optimization
 
@@ -672,19 +672,31 @@ class IndustryConstraint:
         >>>                   {"industry": "Banking", "minimum": 0, "maximum": 5, "unit": "Percent"}])
         >>>     )
         """
-        industry_constraints = pd.DataFrame(industry_constraints) \
-            if isinstance(industry_constraints, list) else industry_constraints
+        # Optimize by:
+        # - Avoid unnecessary DataFrame conversion if already a DataFrame
+        # - Use DataFrame.itertuples for iteration to avoid records materialization and dict overhead
 
-        missing_columns = [col for col in ['industry', 'minimum', 'maximum', 'unit']
-                           if col not in industry_constraints.columns]
+        # Only convert to DataFrame if not already an instance
+        if not isinstance(industry_constraints, pd.DataFrame):
+            industry_constraints = pd.DataFrame(industry_constraints)
+
+        columns = industry_constraints.columns
+        # Fast check for missing columns
+        required_cols = {'industry', 'minimum', 'maximum', 'unit'}
+        missing_columns = required_cols - set(columns)
         if missing_columns:
             raise MqValueError(f"The input is missing required columns: {', '.join(missing_columns)}")
-        industry_constraints_as_records = industry_constraints.to_dict(orient='records')
 
-        return [cls(industry_name=row.get('industry'),
-                    minimum=row.get('minimum'),
-                    maximum=row.get('maximum'),
-                    unit=OptimizationConstraintUnit(row.get('unit'))) for row in industry_constraints_as_records]
+        # Use itertuples for faster row iteration without allocation of intermediate dicts
+        get_unit = OptimizationConstraintUnit  # local bind for speed
+        # Naming matches DataFrame columns
+        # Index is False for namedtuple without index
+        return [cls(
+                    industry_name=row.industry,
+                    minimum=row.minimum,
+                    maximum=row.maximum,
+                    unit=get_unit(row.unit)
+                ) for row in industry_constraints.itertuples(index=False)]
 
 
 class FactorConstraint:
