@@ -35,9 +35,11 @@ class ScenarioCalculationType(Enum):
 class FactorShock:
     """ Marquee Factor Shock """
 
-    def __init__(self,
-                 factor: Union[str, Factor],
-                 shock: float):
+    def __init__(
+        self,
+        factor: Union[str, Factor],
+        shock: float
+    ):
         self.__factor = factor
         self.__shock = shock
 
@@ -70,14 +72,18 @@ class FactorShock:
         self.__shock = shock
 
     def to_dict(self):
+        factor = self.__factor
         return {
-            "factor": self.factor.name if isinstance(self.factor, Factor) else self.factor,
-            "shock": self.shock
+            "factor": factor.name if isinstance(factor, Factor) else factor,
+            "shock": self.__shock
         }
 
     @classmethod
     def from_dict(cls, obj):
-        return FactorShock(factor=obj.get("factor"), shock=obj.get("shock"))
+        # Tighten up constructor call to use cls rather than FactorShock (possible, faster in future if subclassed)
+        factor = obj.get("factor")
+        shock = obj.get("shock")
+        return cls(factor, shock)
 
 
 class FactorShockParameters:
