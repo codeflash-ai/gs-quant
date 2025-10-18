@@ -91,7 +91,12 @@ class LegendItem:
 
     @classmethod
     def from_dict(cls, obj):
-        return LegendItem(color=obj['color'], icon=obj['icon'], name=obj['name'], tooltip=obj.get('tooltip'))
+        # Cache local variables for faster attribute access
+        color = obj['color']
+        icon = obj['icon']
+        name = obj['name']
+        tooltip = obj.get('tooltip')
+        return cls(color, icon, name, tooltip)
 
 
 class RelatedLinkType(Enum):
@@ -595,7 +600,7 @@ class LegendComponent(Component):
                  id_: Optional[str] = None,
                  *,
                  width: int = None,
-                 selections: List[Selection] = None,
+                 selections: List['Selection'] = None,
                  items: List[LegendItem] = None,
                  position: str = None,
                  transparent: bool = None):
@@ -628,11 +633,18 @@ class LegendComponent(Component):
     @classmethod
     def from_dict(cls, obj: Dict, scale: int = None):
         parameters = obj.get('parameters', {})
-        items = [LegendItem.from_dict(item) for item in parameters.get('items', [])]
+        items_data = parameters.get('items', [])
+        # Use direct allocation for a known type; avoid function call overhead in listcomp
+        inst = LegendItem
+        items = [inst.from_dict(item) for item in items_data]
 
-        return LegendComponent(id_=obj['id'], height=parameters.get('height', 200), width=scale,
-                               selections=obj.get('selections'), position=parameters.get('position'),
-                               transparent=parameters.get('transparent'), items=items)
+        return cls(id_=obj['id'],
+                   height=parameters.get('height', 200),
+                   width=scale,
+                   selections=obj.get('selections'),
+                   position=parameters.get('position'),
+                   transparent=parameters.get('transparent'),
+                   items=items)
 
 
 class MonitorComponent(Component):
