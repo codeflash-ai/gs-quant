@@ -132,12 +132,13 @@ class HedgeExclusions:
 
 
 class Constraint:
-
-    def __init__(self,
-                 constraint_name: str,
-                 minimum: float = 0,
-                 maximum: float = 100,
-                 constraint_type: Optional[ConstraintType] = None):
+    def __init__(
+        self,
+        constraint_name: str,
+        minimum: float = 0,
+        maximum: float = 100,
+        constraint_type: Optional['ConstraintType'] = None
+    ):
         self.__constraint_name = constraint_name
         self.__minimum = minimum
         self.__maximum = maximum
@@ -189,18 +190,37 @@ class Constraint:
                           maximum=as_dict.get('max'))
 
     def to_dict(self):
+        # Preallocate response with all keys that can exist
         response = {
-            'name': self.constraint_name,
-            'min': self.minimum,
-            'max': self.maximum
+            'name': self.__constraint_name,
+            'min': self.__minimum,
+            'max': self.__maximum
         }
-        if self.constraint_type != ConstraintType.ESG and self.constraint_type != ConstraintType.ASSET:
-            response['type'] = self.constraint_type.value
-        if self.constraint_type == ConstraintType.ASSET:
-            response['assetId'] = response['name']
-            response.pop('name')
-
+        ct = self.__constraint_type
+        if ct != ConstraintType.ESG and ct != ConstraintType.ASSET:
+            # Use attribute lookup only once for 'value'
+            response['type'] = ct.value
+        if ct == ConstraintType.ASSET:
+            # Direct key assignment instead of pop
+            response['assetId'] = self.__constraint_name
+            del response['name']
         return response
+
+    @property
+    def constraint_name(self) -> str:
+        return self.__constraint_name
+
+    @property
+    def minimum(self) -> float:
+        return self.__minimum
+
+    @property
+    def maximum(self) -> float:
+        return self.__maximum
+
+    @property
+    def constraint_type(self) -> Optional['ConstraintType']:
+        return self.__constraint_type
 
 
 class HedgeConstraints:
