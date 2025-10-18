@@ -368,11 +368,12 @@ class AssetConstraint:
 
 class CountryConstraint:
 
-    def __init__(self,
-                 country_name: str,
-                 minimum: float = 0,
-                 maximum: float = 100,
-                 unit: OptimizationConstraintUnit = OptimizationConstraintUnit.PERCENT):
+    def __init__(
+            self,
+            country_name: str,
+            minimum: float = 0,
+            maximum: float = 100,
+            unit: OptimizationConstraintUnit = OptimizationConstraintUnit.PERCENT):
         """
         Constrain notional held in any particular country in the resulting optimization
 
@@ -381,7 +382,8 @@ class CountryConstraint:
         :param maximum: maximum
         :param unit: the unit in which the min and max values are passed in with (defaults to percent)
         """
-        if unit not in [OptimizationConstraintUnit.PERCENT, OptimizationConstraintUnit.DECIMAL]:
+        # Optimize unit validation from list to tuple to avoid unnecessary list allocations
+        if unit not in (OptimizationConstraintUnit.PERCENT, OptimizationConstraintUnit.DECIMAL):
             raise MqValueError('Country constraints can only be set by percent or decimal.')
         self.__country_name = country_name
         self.__minimum = minimum
@@ -423,11 +425,16 @@ class CountryConstraint:
         self.__unit = value
 
     def to_dict(self):
+        # Cache unit for faster multiple attribute access and avoid repeated lookups
+        unit = self.__unit
+        is_decimal = unit == OptimizationConstraintUnit.DECIMAL
+        min_val = self.__minimum * 100 if is_decimal else self.__minimum
+        max_val = self.__maximum * 100 if is_decimal else self.__maximum
         return {
             'type': 'Country',
-            'name': self.country_name,
-            'min': self.minimum * 100 if self.unit == OptimizationConstraintUnit.DECIMAL else self.minimum,
-            'max': self.maximum * 100 if self.unit == OptimizationConstraintUnit.DECIMAL else self.maximum
+            'name': self.__country_name,
+            'min': min_val,
+            'max': max_val
         }
 
     @classmethod
@@ -471,6 +478,22 @@ class CountryConstraint:
                     minimum=row.get('minimum'),
                     maximum=row.get('maximum'),
                     unit=OptimizationConstraintUnit(row.get('unit'))) for row in country_constraints_as_records]
+
+    @property
+    def country_name(self) -> str:
+        return self.__country_name
+
+    @property
+    def minimum(self) -> float:
+        return self.__minimum
+
+    @property
+    def maximum(self) -> float:
+        return self.__maximum
+
+    @property
+    def unit(self):
+        return self.__unit
 
 
 class SectorConstraint:
