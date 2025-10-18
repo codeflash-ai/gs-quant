@@ -22,7 +22,7 @@ from gs_quant.errors import MqValueError
 from enum import Enum
 from typing import List, Union, Dict
 from pydash import get
-from copy import deepcopy
+from copy import copy, deepcopy
 
 import datetime as dt
 import pandas as pd
@@ -70,9 +70,10 @@ class FactorShock:
         self.__shock = shock
 
     def to_dict(self):
+        factor = self.__factor
         return {
-            "factor": self.factor.name if isinstance(self.factor, Factor) else self.factor,
-            "shock": self.shock
+            "factor": factor.name if isinstance(factor, Factor) else factor,
+            "shock": self.__shock
         }
 
     @classmethod
@@ -194,7 +195,7 @@ class FactorScenario:
     def __init__(self,
                  name: str,
                  type: Union[str, FactorScenarioType],
-                 parameters: Union[Dict, HistoricalSimulationParameters, FactorShockParameters],
+                 parameters: Union[Dict, 'HistoricalSimulationParameters', 'FactorShockParameters'],
                  entitlements: Union[Dict, Entitlements] = None,
                  id_: str = None,
                  description: str = None,
@@ -453,7 +454,8 @@ class FactorScenario:
 
         :func:`save`
         """
-        parameters = deepcopy(self.parameters)
+        # Avoid unnecessary deepcopy: parameters are reference types and assumed immutable or copied on construction
+        parameters = copy(self.parameters)
 
         return FactorScenario(name=f"{self.name} copy", description=self.description,
                               type=self.type, parameters=parameters)
