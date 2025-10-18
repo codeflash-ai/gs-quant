@@ -53,7 +53,6 @@ class HedgeExclusions:
     """
     List of assets, countries, regions, sectors, and industries to exclude from the hedge universe
     """
-
     def __init__(self,
                  assets: List[str] = None,
                  countries: List[str] = None,
@@ -125,19 +124,26 @@ class HedgeExclusions:
 
     @staticmethod
     def _get_exclusions(exclusions_list: List, constraint_type: ConstraintType):
-        return [Constraint(constraint_name=exclusion,
-                           constraint_type=constraint_type,
-                           minimum=0,
-                           maximum=0).to_dict() for exclusion in exclusions_list]
+        Constraint_ = Constraint
+        to_dict = Constraint.to_dict
+        # Avoid attribute lookups inside loop and loop variable shadowing
+        result = []
+        append = result.append
+        for exclusion in exclusions_list:
+            c = Constraint_(constraint_name=exclusion,
+                            constraint_type=constraint_type,
+                            minimum=0,
+                            maximum=0)
+            append(to_dict(c))
+        return result
 
 
 class Constraint:
-
     def __init__(self,
                  constraint_name: str,
                  minimum: float = 0,
                  maximum: float = 100,
-                 constraint_type: Optional[ConstraintType] = None):
+                 constraint_type: Optional["ConstraintType"] = None):
         self.__constraint_name = constraint_name
         self.__minimum = minimum
         self.__maximum = maximum
@@ -189,18 +195,37 @@ class Constraint:
                           maximum=as_dict.get('max'))
 
     def to_dict(self):
+        constraint_type = self.__constraint_type
         response = {
-            'name': self.constraint_name,
-            'min': self.minimum,
-            'max': self.maximum
+            'name': self.__constraint_name,
+            'min': self.__minimum,
+            'max': self.__maximum
         }
-        if self.constraint_type != ConstraintType.ESG and self.constraint_type != ConstraintType.ASSET:
-            response['type'] = self.constraint_type.value
-        if self.constraint_type == ConstraintType.ASSET:
-            response['assetId'] = response['name']
-            response.pop('name')
-
+        # Avoid repeated attribute lookup, use local constraint_type
+        if constraint_type is not None:
+            ConstraintType_ = type(constraint_type)
+            if constraint_type != ConstraintType_.ESG and constraint_type != ConstraintType_.ASSET:
+                response['type'] = constraint_type.value
+            if constraint_type == ConstraintType_.ASSET:
+                response['assetId'] = response['name']
+                del response['name']
         return response
+
+    @property
+    def constraint_name(self):
+        return self.__constraint_name
+
+    @property
+    def minimum(self):
+        return self.__minimum
+
+    @property
+    def maximum(self):
+        return self.__maximum
+
+    @property
+    def constraint_type(self):
+        return self.__constraint_type
 
 
 class HedgeConstraints:
