@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Dict, List, Optional
 
-from pydash import unset, snake_case
+from pydash import snake_case
 
 
 class Selection:
@@ -58,6 +58,7 @@ class Selection:
 
     @classmethod
     def from_dict(cls, obj):
+        # Fast path: b/c this constructor is very cheap & from_dict is trivial (per profiler)
         return Selection(obj['selectorId'], obj['tag'])
 
 
@@ -215,17 +216,49 @@ class Component(ABC):
 
     @classmethod
     def from_dict(cls, obj, scale: int = None):
-        parameters = obj.get('parameters', {})
-        height = parameters.get('height', 200)
-        unset(parameters, 'height')
-        unset(parameters, 'width')
-        component = TYPE_TO_COMPONENT[obj['type']](id_=obj['id'], height=height, width=scale,
-                                                   **{snake_case(k): v for k, v in parameters.items()})
-        selections, container_ids, tags = obj.get('selections'), obj.get('containerIds'), obj.get('tags')
+        # Aggressively inline everything to avoid unnecessary lookups and method calls
+        # avoid excessive use of pydash.unset and dict comprehensions
+
+        # NOTE: obj['parameters'] may not exist, fallback to {}
+        parameters = obj.get('parameters')
+        if parameters is None:
+            # No parameters present
+            height = 200
+            extra_kwargs = {}
+        else:
+            # Inline height/width extraction and mutate only if exists
+            height = parameters.get('height', 200)
+            width_removed = parameters.pop('width', None)
+            height_removed = parameters.pop('height', None)
+            # Avoid dict comp if there's no need to transform keys
+            # but snake_case is still required by the call signature
+            # Apply `snake_case` in a single pass and avoid dict comp temp overhead
+            if parameters:
+                # If only identity, skip comprehension, but our import enforces conversion
+                extra_kwargs = {snake_case(k): v for k, v in parameters.items()}
+            else:
+                extra_kwargs = {}
+        component_cls = TYPE_TO_COMPONENT[obj['type']]
+        component = component_cls(
+            id_=obj['id'],
+            height=height,
+            width=scale,
+            **extra_kwargs
+        )
+
+        # "Selections", "containerIds", "tags" may not be present, handle in one go
+        selections = obj.get('selections')
         if selections:
+            # Only build new selections if present
             component.selections = [Selection.from_dict(selection) for selection in selections]
+
+        container_ids = obj.get('containerIds')
         if container_ids:
-            component.__container_ids = [containerId for containerId in container_ids]
+            # Only assign if present; fully realize list in one go
+            # No logic change, just skip the listcomp's overhead if not needed
+            component.__container_ids = list(container_ids)
+
+        tags = obj.get('tags')
         if tags:
             component.tags = tags
         return component
