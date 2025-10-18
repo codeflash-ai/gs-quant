@@ -814,8 +814,15 @@ class Hedge:
     def format_dictionary_key_to_readable_format(renamed_results):
         formatted_results = {}
         for inner_key in renamed_results:
-            formatted_results[inner_key[0].capitalize() + ''.join(map(lambda x: x if x.islower() else f' {x}',
-                                                                      inner_key[1:]))] = renamed_results[inner_key]
+            # Build readable format using list for efficiency
+            result_chars = [inner_key[0].capitalize()]
+            for char in inner_key[1:]:
+                if char.islower():
+                    result_chars.append(char)
+                else:
+                    result_chars.append(' ')
+                    result_chars.append(char)
+            formatted_results[''.join(result_chars)] = renamed_results[inner_key]
         return formatted_results
 
     @staticmethod
