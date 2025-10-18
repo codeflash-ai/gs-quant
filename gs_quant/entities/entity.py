@@ -240,7 +240,16 @@ class Country(Entity):
         return get(self.get_entity(), 'xref.alpha3')
 
     def get_bbid(self):
-        return get(self.get_entity(), 'xref.bbid')
+        entity = self.get_entity()
+        if entity is None:
+            return None
+        try:
+            xref = entity.get('xref')
+            if xref is None:
+                return None
+            return xref.get('bbid')
+        except AttributeError:
+            return None
 
     def get_alpha2(self):
         return get(self.get_entity(), 'xref.alpha2')
