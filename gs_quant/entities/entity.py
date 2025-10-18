@@ -106,10 +106,10 @@ class Entity(metaclass=ABCMeta):
 
     def __init__(self,
                  id_: str,
-                 entity_type: EntityType,
+                 entity_type: 'EntityType',
                  entity: Optional[Dict] = None):
         self.__id: str = id_
-        self.__entity_type: EntityType = entity_type
+        self.__entity_type: 'EntityType' = entity_type
         self.__entity: Dict = entity
 
     @property
@@ -339,7 +339,12 @@ class RiskModelEntity(Entity):
         return get(self.get_entity(), 'name')
 
     def get_coverage(self) -> Optional[str]:
-        return get(self.get_entity(), 'coverage')
+        entity = self.get_entity()
+        # Fast path using direct dict lookup instead of pydash.get
+        if entity is not None and 'coverage' in entity:
+            return entity['coverage']
+        # Fallback to None if entity is None or doesn't contain 'coverage'
+        return None
 
     def get_term(self) -> Optional[str]:
         return get(self.get_entity(), 'term')
