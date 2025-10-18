@@ -153,7 +153,9 @@ class CloseMarket(Market):
         return hash((self.date, self.location))
 
     def __eq__(self, other):
-        return isinstance(other, CloseMarket) and self.date == other.date and self.location == other.location
+        if not isinstance(other, CloseMarket):
+            return False
+        return (self.__date == other.__date) and (self.__location == other.__location)
 
     @property
     def location(self) -> PricingLocation:
