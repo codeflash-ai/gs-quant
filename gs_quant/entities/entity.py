@@ -302,7 +302,10 @@ class KPI(Entity):
         super().get(id_value, id_type)
 
     def get_name(self) -> Optional[str]:
-        return get(self.get_entity(), 'name')
+        entity = self.get_entity()
+        if entity is not None and isinstance(entity, dict):
+            return entity.get('name')
+        return None
 
     def get_category(self) -> Optional[str]:
         return get(self.get_entity(), 'category')
