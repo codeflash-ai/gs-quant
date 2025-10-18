@@ -243,7 +243,13 @@ class Country(Entity):
         return get(self.get_entity(), 'xref.bbid')
 
     def get_alpha2(self):
-        return get(self.get_entity(), 'xref.alpha2')
+        entity = self.get_entity()
+        if not entity or not isinstance(entity, dict):
+            return None
+        xref = entity.get('xref')
+        if not isinstance(xref, dict):
+            return None
+        return xref.get('alpha2')
 
     def get_country_code(self):
         return get(self.get_entity(), 'xref.countryCode')
