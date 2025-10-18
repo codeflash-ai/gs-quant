@@ -23,6 +23,7 @@ from pydash import unset, snake_case
 
 
 class Selection:
+
     def __init__(self,
                  selector_id: str,
                  tag: str):
@@ -143,6 +144,7 @@ class PromoSize(Enum):
 
 
 class Component(ABC):
+
     def __init__(self,
                  height: Optional[int] = None,
                  id_: Optional[str] = None,
@@ -206,10 +208,13 @@ class Component(ABC):
                 'height': self._height or 200
             }
         }
-        if self.__selections:
-            dict_['selections'] = [selection.as_dict() for selection in self.__selections]
-        if self.__container_ids:
-            dict_['containerIds'] = [containerId for containerId in self.__container_ids]
+        selections = self.__selections
+        if selections:
+            # Avoid attribute lookup in loop
+            dict_['selections'] = [selection.as_dict() for selection in selections]
+        container_ids = self.__container_ids
+        if container_ids:
+            dict_['containerIds'] = list(container_ids)  # Copy as in original, but direct
 
         return dict_
 
