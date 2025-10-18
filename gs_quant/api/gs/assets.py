@@ -22,7 +22,6 @@ from functools import wraps
 from typing import Iterable, List, Optional, Tuple, Union, Callable
 
 import backoff
-import cachetools
 import cachetools.keys
 import pandas as pd
 from pydash import get, has
@@ -38,6 +37,10 @@ from gs_quant.target.assets import Asset as __Asset, AssetToInstrumentResponse, 
 from gs_quant.target.assets import FieldFilterMap
 from gs_quant.target.reports import Report
 from gs_quant.tracing import Tracer
+
+_fallback_cache_lock = threading.Lock()
+
+_fallback_cache_instance = None
 
 _logger = logging.getLogger(__name__)
 IdList = Union[Tuple[str, ...], List]
@@ -117,8 +120,8 @@ def _cached(fn):
 
 def _cached_async(fn):
     _fn_cache_lock = threading.Lock()
-    # short-term cache to avoid retrieving the same data several times in succession
-    fallback_cache: AssetCache = get_default_cache()
+    # Use global fallback cache instance to save memory and instantiation cost
+    fallback_cache: AssetCache = _get_fallback_cache()
 
     @wraps(fn)
     async def wrapper(cls, *args, **kwargs):
@@ -145,6 +148,16 @@ def _cached_async(fn):
         return result
 
     return wrapper
+
+
+def _get_fallback_cache() -> AssetCache:
+    # Use double-checked locking to avoid holding lock unless constructing instance
+    global _fallback_cache_instance
+    if _fallback_cache_instance is None:
+        with _fallback_cache_lock:
+            if _fallback_cache_instance is None:
+                _fallback_cache_instance = get_default_cache()
+    return _fallback_cache_instance
 
 
 class GsIdType(Enum):
