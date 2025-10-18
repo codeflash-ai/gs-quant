@@ -1,4 +1,3 @@
-
 # This file helps to compute a version number in source trees obtained from
 # git-archive tarball (such as those provided by githubs download-from-tag
 # feature). Distribution tarballs (built by setup.py sdist) and build
@@ -18,6 +17,10 @@ import subprocess
 import sys
 from typing import Callable, Dict
 import functools
+
+_re_digit = re.compile(r'\d')
+
+_re_start_digit = re.compile(r'\d')
 
 
 def get_keywords():
@@ -175,7 +178,6 @@ def git_versions_from_keywords(keywords, tag_prefix, verbose):
         # Use only the last line.  Previous lines may contain GPG signature
         # information.
         date = date.splitlines()[-1]
-
         # git-2.2.0 added "%cI", which expands to an ISO-8601 -compliant
         # datestamp. However we prefer "%ci" (which expands to an "ISO-8601
         # -like" string, which we must then edit to make compliant), because
@@ -188,44 +190,55 @@ def git_versions_from_keywords(keywords, tag_prefix, verbose):
         if verbose:
             print("keywords are unexpanded, not using")
         raise NotThisMethod("unexpanded keywords, not a git-archive tarball")
-    refs = {r.strip() for r in refnames.strip("()").split(",")}
-    # starting in git-1.8.3, tags are listed as "tag: foo-1.0" instead of
-    # just "foo-1.0". If we see a "tag: " prefix, prefer those.
+    stripped_refnames = refnames.strip("()")
+    split_refnames = stripped_refnames.split(",")
+    
+    # OPTIMIZATION: 
+    # Use tuple comprehension and pre-allocate list to set for faster creation.
+    # Avoid creating temporary sets for 'refs' and 'tags'
+    # Reduce string allocations in set comprehensions
     TAG = "tag: "
-    tags = {r[len(TAG):] for r in refs if r.startswith(TAG)}
+    len_TAG = len(TAG)
+    refs = [r.strip() for r in split_refnames]
+
+    # Build tags in one pass
+    tags = []
+    other_tag_candidates = []
+    for r in refs:
+        if r.startswith(TAG):
+            tags.append(r[len_TAG:])
+        else:
+            other_tag_candidates.append(r)
     if not tags:
-        # Either we're using git < 1.8.3, or there really are no tags. We use
-        # a heuristic: assume all version tags have a digit. The old git %d
-        # expansion behaves like git log --decorate=short and strips out the
-        # refs/heads/ and refs/tags/ prefixes that would let us distinguish
-        # between branches and tags. By ignoring refnames without digits, we
-        # filter out many common branch names like "release" and
-        # "stabilization", as well as "HEAD" and "master".
-        tags = {r for r in refs if re.search(r'\d', r)}
+        # Only if no "tag: " tags, collect refs with any digit (heuristic)
+        tags = [r for r in other_tag_candidates if _re_digit.search(r)]
         if verbose:
-            print("discarding '%s', no digits" % ",".join(refs - tags))
+            print("discarding '%s', no digits" % ",".join(set(other_tag_candidates) - set(tags)))
     if verbose:
         print("likely tags: %s" % ",".join(sorted(tags)))
-    for ref in sorted(tags):
+    # Pre-sort
+    tags_sorted = sorted(tags)
+    full_revisionid = keywords["full"].strip()
+    for ref in tags_sorted:
         # sorting will prefer e.g. "2.0" over "2.0rc1"
         if ref.startswith(tag_prefix):
             r = ref[len(tag_prefix):]
             # Filter out refs that exactly match prefix or that don't start
             # with a number once the prefix is stripped (mostly a concern
             # when prefix is '')
-            if not re.match(r'\d', r):
+            if not _re_start_digit.match(r):
                 continue
             if verbose:
                 print("picking %s" % r)
             return {"version": r,
-                    "full-revisionid": keywords["full"].strip(),
+                    "full-revisionid": full_revisionid,
                     "dirty": False, "error": None,
                     "date": date}
     # no suitable tags, so version is "0+unknown", but full hex is still there
     if verbose:
         print("no suitable tags, using unknown + full revision id")
     return {"version": "0+unknown",
-            "full-revisionid": keywords["full"].strip(),
+            "full-revisionid": full_revisionid,
             "dirty": False, "error": "no suitable tags", "date": None}
 
 
