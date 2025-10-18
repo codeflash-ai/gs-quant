@@ -1,4 +1,3 @@
-
 # This file helps to compute a version number in source trees obtained from
 # git-archive tarball (such as those provided by githubs download-from-tag
 # feature). Distribution tarballs (built by setup.py sdist) and build
@@ -364,7 +363,9 @@ def git_pieces_from_vcs(tag_prefix, root, verbose, runner=run_command):
 
 def plus_or_dot(pieces):
     """Return a + if we don't already have one, else return a ."""
-    if "+" in pieces.get("closest-tag", ""):
+    # Use local variable for get to avoid repeated global lookup
+    tag = pieces.get("closest-tag", "")
+    if "+" in tag:
         return "."
     return "+"
 
@@ -403,23 +404,31 @@ def render_pep440_branch(pieces):
     Exceptions:
     1: no tags. 0[.dev0]+untagged.DISTANCE.gHEX[.dirty]
     """
-    if pieces["closest-tag"]:
-        rendered = pieces["closest-tag"]
-        if pieces["distance"] or pieces["dirty"]:
-            if pieces["branch"] != "master":
+    # Local variables for fields used multiple times for faster lookup
+    branch = pieces["branch"]
+    dirty = pieces["dirty"]
+    distance = pieces["distance"]
+    short = pieces["short"]
+    closest_tag = pieces["closest-tag"]
+
+    if closest_tag:
+        rendered = closest_tag
+        additional = (distance or dirty)
+        if additional:
+            if branch != "master":
                 rendered += ".dev0"
             rendered += plus_or_dot(pieces)
-            rendered += "%d.g%s" % (pieces["distance"], pieces["short"])
-            if pieces["dirty"]:
+            # String formatting is expensive, avoid tuple lookup and only format if needed
+            rendered += f"{distance}.g{short}"
+            if dirty:
                 rendered += ".dirty"
     else:
         # exception #1
         rendered = "0"
-        if pieces["branch"] != "master":
+        if branch != "master":
             rendered += ".dev0"
-        rendered += "+untagged.%d.g%s" % (pieces["distance"],
-                                          pieces["short"])
-        if pieces["dirty"]:
+        rendered += f"+untagged.{distance}.g{short}"
+        if dirty:
             rendered += ".dirty"
     return rendered
 
