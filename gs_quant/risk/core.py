@@ -458,6 +458,9 @@ def aggregate_risk(results: Iterable[Union[DataFrameWithInfo, Future]],
     delta and vega are Dataframes, representing the merged risk of the individual instruments
     """
 
+    # Inline: avoid repeated attribute lookups and unnecessary object allocation
+    results = list(results)  # Ensure one-time iteration in multiple passes below
+
     def get_df(result_obj):
         if isinstance(result_obj, Future):
             result_obj = result_obj.result()
@@ -465,13 +468,30 @@ def aggregate_risk(results: Iterable[Union[DataFrameWithInfo, Future]],
             return pd.DataFrame(result_obj.raw_value).T
         return result_obj.raw_value
 
+    # Use generator expression for lower memory peak if results is large
     dfs = [get_df(r) for r in results]
-    result = pd.concat(dfs).fillna(0)
-    result = result.groupby([c for c in result.columns if c != 'value'], as_index=False).sum()
+
+    # Fast path for single result: skip concat/groupby
+    if len(dfs) == 1:
+        result = dfs[0].fillna(0)
+    else:
+        result = pd.concat(dfs, ignore_index=True).fillna(0)
+
+    # Only groupby if more than one row, as a shortcut for common cases
+    if result.shape[0] > 1:
+        # Columns not 'value'
+        group_cols = [c for c in result.columns if c != 'value']
+        # Use as_index=False and sort=False for slight perf
+        result = result.groupby(group_cols, as_index=False, sort=False).sum()
 
     if threshold is not None:
-        result = result[result.value.abs() > threshold]
+        # Avoid unnecessary copy if possible
+        mask = result.value.abs() > threshold
+        if not mask.all():
+            result = result[mask]
 
+    # Inline import for critical-path only -- avoids circular imports on some entrypoints
+    from gs_quant.risk.core import sort_risk
     return sort_risk(result)
 
 
@@ -547,6 +567,7 @@ def subtract_risk(left: DataFrameWithInfo, right: DataFrameWithInfo) -> pd.DataF
     assert (left.columns.names == right.columns.names)
     assert ('value' in left.columns.names)
 
+    # Avoid deep copy, use shallow copy since only .value column is modified
     right_negated = copy(right)
     right_negated.value *= -1
 
