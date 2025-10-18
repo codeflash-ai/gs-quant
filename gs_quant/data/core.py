@@ -20,6 +20,8 @@ from enum import Enum
 from gs_quant.context_base import ContextBaseWithDefault
 from gs_quant.errors import MqTypeError, MqValueError
 
+_INTERVAL_REGEX = re.compile(r'[1-9]\d{0,2}[a-z]')
+
 
 def _now():
     return dt.datetime.now(dt.timezone.utc)
@@ -67,7 +69,7 @@ class DataContext(ContextBaseWithDefault):
 
         if not isinstance(interval, str):
             raise MqTypeError('interval must be a str')
-        if not re.fullmatch('[1-9]\\d{0,2}[a-z]', interval):
+        if not _INTERVAL_REGEX.fullmatch(interval):
             raise MqValueError('interval must be a valid str e.g. 1m, 2h, 3d')
         self.__interval = interval
 
@@ -81,9 +83,17 @@ class DataContext(ContextBaseWithDefault):
         elif isinstance(o, dt.date):
             return o
         elif isinstance(o, str):
-            loc = o.find('T')
-            ds = o[:loc] if loc != -1 else o
-            return dt.datetime.strptime(ds, '%Y-%m-%d').date()
+            ds = o.partition('T')[0]
+
+            # Fast-path: use fromisoformat for YYYY-MM-DD dates.
+            # This avoids expensive strptime for ISO 8601 date strings.
+            # Only fallback to strptime if fromisoformat fails.
+            try:
+                return dt.date.fromisoformat(ds)
+            except ValueError:
+                if len(ds) == 10 and ds[4] == '-' and ds[7] == '-' and ds[:4].isdigit() and ds[5:7].isdigit() and ds[8:10].isdigit():
+                    return dt.datetime.strptime(ds, '%Y-%m-%d').date()
+                raise ValueError(f'{o} is not a valid date')
         else:
             raise ValueError(f'{o} is not a valid date')
 
