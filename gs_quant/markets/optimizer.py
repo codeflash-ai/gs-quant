@@ -265,10 +265,11 @@ class AssetConstraint:
         self.__unit = value
 
     def to_dict(self):
+        decimal = self.__unit == OptimizationConstraintUnit.DECIMAL
         return {
-            'assetId': self.asset if isinstance(self.asset, str) else self.asset.get_marquee_id(),
-            'min': self.minimum * 100 if self.unit == OptimizationConstraintUnit.DECIMAL else self.minimum,
-            'max': self.maximum * 100 if self.unit == OptimizationConstraintUnit.DECIMAL else self.maximum
+            'assetId': self.__asset if isinstance(self.__asset, str) else self.__asset.get_marquee_id(),
+            'min': self.__minimum * 100 if decimal else self.__minimum,
+            'max': self.__maximum * 100 if decimal else self.__maximum
         }
 
     @classmethod
