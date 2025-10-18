@@ -225,7 +225,10 @@ class Country(Entity):
         return get(self.get_entity(), 'name')
 
     def get_region(self) -> Optional[str]:
-        return get(self.get_entity(), 'region')
+        entity = self.get_entity()
+        if entity is not None and isinstance(entity, dict):
+            return entity.get('region')
+        return None
 
     def get_sub_region(self):
         return get(self.get_entity(), 'subRegion')
