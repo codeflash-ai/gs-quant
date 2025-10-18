@@ -734,12 +734,25 @@ class Hedge:
         :return: a DataFrame with results
         """
         constituents = self.result.get('Hedge', {}).get('Constituents', [])
+        
+        def _format_key(key: str) -> str:
+            chars = [key[0].capitalize()]
+            for x in key[1:]:
+                if x.islower():
+                    chars.append(x)
+                else:
+                    chars.append(' ')
+                    chars.append(x)
+            return ''.join(chars)
+        
+        key_cache = {}
         formatted_constituents = []
         for row in constituents:
             formatted_row = {}
             for key in row:
-                formatted_row[key[0].capitalize() +
-                              ''.join(map(lambda x: x if x.islower() else f' {x}', key[1:]))] = row[key]
+                if key not in key_cache:
+                    key_cache[key] = _format_key(key)
+                formatted_row[key_cache[key]] = row[key]
             formatted_constituents.append(formatted_row)
         return pd.DataFrame(formatted_constituents)
 
