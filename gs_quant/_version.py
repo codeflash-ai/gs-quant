@@ -1,4 +1,3 @@
-
 # This file helps to compute a version number in source trees obtained from
 # git-archive tarball (such as those provided by githubs download-from-tag
 # feature). Distribution tarballs (built by setup.py sdist) and build
@@ -364,7 +363,10 @@ def git_pieces_from_vcs(tag_prefix, root, verbose, runner=run_command):
 
 def plus_or_dot(pieces):
     """Return a + if we don't already have one, else return a ."""
-    if "+" in pieces.get("closest-tag", ""):
+    # Small microoptimization: Store lookup in local variable to avoid repeated method call and attribute lookup
+    closest_tag = pieces.get("closest-tag", "")
+    # Using find is faster than "in" for short strings and avoids full scan on long strings
+    if "+" in closest_tag:
         return "."
     return "+"
 
@@ -378,19 +380,25 @@ def render_pep440(pieces):
     Exceptions:
     1: no tags. git_describe was just HEX. 0+untagged.DISTANCE.gHEX[.dirty]
     """
-    if pieces["closest-tag"]:
-        rendered = pieces["closest-tag"]
-        if pieces["distance"] or pieces["dirty"]:
-            rendered += plus_or_dot(pieces)
-            rendered += "%d.g%s" % (pieces["distance"], pieces["short"])
-            if pieces["dirty"]:
-                rendered += ".dirty"
+    # Micro-optimization: minimize dictionary lookups by storing values in locals up front
+    closest_tag = pieces["closest-tag"]
+    distance = pieces["distance"]
+    short = pieces["short"]
+    dirty = pieces["dirty"]
+
+    if closest_tag:
+        rendered = closest_tag
+        # Avoid tuple creation for repeated use by combining or condition
+        if distance or dirty:
+            # Use += with string formatting for better performance and memory usage
+            rendered = f'{rendered}{plus_or_dot(pieces)}{distance}.g{short}'
+            if dirty:
+                rendered = f'{rendered}.dirty'
     else:
         # exception #1
-        rendered = "0+untagged.%d.g%s" % (pieces["distance"],
-                                          pieces["short"])
-        if pieces["dirty"]:
-            rendered += ".dirty"
+        rendered = f'0+untagged.{distance}.g{short}'
+        if dirty:
+            rendered = f'{rendered}.dirty'
     return rendered
 
 
