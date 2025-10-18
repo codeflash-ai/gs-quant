@@ -458,19 +458,38 @@ class CountryConstraint:
         >>>                   {"country": "Germany", "minimum": 0, "maximum": 5, "unit": "Percent"}])
         >>>     )
         """
-        country_constraints = pd.DataFrame(country_constraints) \
-            if isinstance(country_constraints, list) else country_constraints
+        # Avoid unnecessary DataFrame creation if already a DataFrame
+        df = (pd.DataFrame(country_constraints) if isinstance(country_constraints, list)
+              else country_constraints)
 
-        missing_columns = [col for col in ['country', 'minimum', 'maximum', 'unit']
-                           if col not in country_constraints.columns]
+        # Short-circuit missing columns check with a set difference (faster for large col lists)
+        required = {'country', 'minimum', 'maximum', 'unit'}
+        missing_columns = required - set(df.columns)
         if missing_columns:
             raise MqValueError(f"The input is missing required columns: {', '.join(missing_columns)}")
-        country_constraints_as_records = country_constraints.to_dict(orient='records')
 
-        return [cls(country_name=row.get('country'),
-                    minimum=row.get('minimum'),
-                    maximum=row.get('maximum'),
-                    unit=OptimizationConstraintUnit(row.get('unit'))) for row in country_constraints_as_records]
+        # Avoid .to_dict conversion: iterate as tuples for lower memory usage
+        get = df.get if hasattr(df, "get") else getattr(df, "__getitem__", None)
+        if get is not None and len(df):
+            # Optimize access without creating intermediate dicts for each row
+            idx_country = df.columns.get_loc('country')
+            idx_minimum = df.columns.get_loc('minimum')
+            idx_maximum = df.columns.get_loc('maximum')
+            idx_unit = df.columns.get_loc('unit')
+            values = df.values
+            return [cls(
+                        country_name=row[idx_country],
+                        minimum=row[idx_minimum],
+                        maximum=row[idx_maximum],
+                        unit=OptimizationConstraintUnit(row[idx_unit])
+                    ) for row in values]
+        else:
+            # Fallback (empty DataFrame or no get method)
+            country_constraints_as_records = df.to_dict(orient='records')
+            return [cls(country_name=row.get('country'),
+                        minimum=row.get('minimum'),
+                        maximum=row.get('maximum'),
+                        unit=OptimizationConstraintUnit(row.get('unit'))) for row in country_constraints_as_records]
 
 
 class SectorConstraint:
