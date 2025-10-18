@@ -74,6 +74,7 @@ class WorkspaceCallToAction:
 
 
 class WorkspaceTab:
+
     def __init__(self,
                  id_: str,
                  name: str):
@@ -93,7 +94,7 @@ class WorkspaceTab:
 
     @classmethod
     def from_dict(cls, obj):
-        return WorkspaceTab(id_=obj['id'], name=obj['name'])
+        return cls(obj['id'], obj['name'])
 
 
 class WorkspaceColumn:
