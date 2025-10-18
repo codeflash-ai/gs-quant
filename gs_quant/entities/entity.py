@@ -228,7 +228,10 @@ class Country(Entity):
         return get(self.get_entity(), 'region')
 
     def get_sub_region(self):
-        return get(self.get_entity(), 'subRegion')
+        entity = self.get_entity()
+        if entity is not None and 'subRegion' in entity:
+            return entity['subRegion']
+        return None
 
     def get_region_code(self):
         return get(self.get_entity(), 'regionCode')
