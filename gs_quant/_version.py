@@ -1,4 +1,3 @@
-
 # This file helps to compute a version number in source trees obtained from
 # git-archive tarball (such as those provided by githubs download-from-tag
 # feature). Distribution tarballs (built by setup.py sdist) and build
@@ -18,6 +17,8 @@ import subprocess
 import sys
 from typing import Callable, Dict
 import functools
+
+_config_instance = None
 
 
 def get_keywords():
@@ -41,6 +42,9 @@ def get_config():
     """Create, populate and return the VersioneerConfig() object."""
     # these strings are filled in when 'setup.py versioneer' creates
     # _version.py
+    global _config_instance
+    if _config_instance is not None:
+        return _config_instance
     cfg = VersioneerConfig()
     cfg.VCS = "git"
     cfg.style = "pep440"
@@ -48,6 +52,7 @@ def get_config():
     cfg.parentdir_prefix = "gs_quant-"
     cfg.versionfile_source = "gs_quant/_version.py"
     cfg.verbose = False
+    _config_instance = cfg
     return cfg
 
 
