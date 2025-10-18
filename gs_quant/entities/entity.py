@@ -349,9 +349,9 @@ class RiskModelEntity(Entity):
 
 
 class PositionedEntity(metaclass=ABCMeta):
-    def __init__(self, id_: str, entity_type: EntityType):
+    def __init__(self, id_: str, entity_type: 'EntityType'):
         self.__id: str = id_
-        self.__entity_type: EntityType = entity_type
+        self.__entity_type: 'EntityType' = entity_type
 
     @property
     def id(self) -> str:
@@ -613,8 +613,8 @@ class PositionedEntity(metaclass=ABCMeta):
                                          pricing_date=pricing_date,
                                          cards=[ESGCard.QUINTILES],
                                          measures=[measure]).get('quintiles')[0].get('results')
-        df = pd.DataFrame(quintile_data)
-        return df.filter(items=['description', 'gross', 'long', 'short'])
+        # Directly construct DataFrame with only needed columns
+        return pd.DataFrame(quintile_data, columns=['description', 'gross', 'long', 'short'])
 
     def get_esg_by_sector(self,
                           measure: ESGMeasure,

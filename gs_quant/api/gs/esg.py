@@ -13,6 +13,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 """
+
 import datetime as dt
 import logging
 from enum import Enum
@@ -27,16 +28,17 @@ class ESGCard(Enum):
     """
     ESG Cards
     """
-    SUMMARY = 'summary'
-    QUINTILES = 'quintiles'
-    WEIGHTS_BY_SECTOR = 'weightsBySector'
-    MEASURES_BY_SECTOR = 'measuresBySector'
-    WEIGHTS_BY_REGION = 'weightsByRegion'
-    MEASURES_BY_REGION = 'measuresByRegion'
-    TOP_TEN_RANKED = 'topTenRanked'
-    BOTTOM_TEN_RANKED = 'bottomTenRanked'
-    NO_ESG_DATA = 'noEsgData'
-    NO_PRICING_DATA = 'noPricingData'
+
+    SUMMARY = "summary"
+    QUINTILES = "quintiles"
+    WEIGHTS_BY_SECTOR = "weightsBySector"
+    MEASURES_BY_SECTOR = "measuresBySector"
+    WEIGHTS_BY_REGION = "weightsByRegion"
+    MEASURES_BY_REGION = "measuresByRegion"
+    TOP_TEN_RANKED = "topTenRanked"
+    BOTTOM_TEN_RANKED = "bottomTenRanked"
+    NO_ESG_DATA = "noEsgData"
+    NO_PRICING_DATA = "noPricingData"
 
     def __str__(self):
         return self.value
@@ -46,11 +48,12 @@ class ESGMeasure(Enum):
     """
     ESG Measures
     """
-    G_PERCENTILE = 'gPercentile'
-    G_REGIONAL_PERCENTILE = 'gRegionalPercentile'
-    ES_PERCENTILE = 'esPercentile'
-    ES_DISCLOSURE_PERCENTAGE = 'esDisclosurePercentage'
-    ES_MOMENTUM_PERCENTILE = 'esMomentumPercentile'
+
+    G_PERCENTILE = "gPercentile"
+    G_REGIONAL_PERCENTILE = "gRegionalPercentile"
+    ES_PERCENTILE = "esPercentile"
+    ES_DISCLOSURE_PERCENTAGE = "esDisclosurePercentage"
+    ES_MOMENTUM_PERCENTILE = "esMomentumPercentile"
 
     def __str__(self):
         return self.value
@@ -60,20 +63,23 @@ class GsEsgApi:
     """GS ESG API client implementation"""
 
     @classmethod
-    def get_esg(cls,
-                entity_id: str,
-                benchmark_id: str = None,
-                pricing_date: dt.date = None,
-                measures: List[ESGMeasure] = [],
-                cards: List[ESGCard] = []) -> Dict:
-        url = f'/esg/{entity_id}?'
+    def get_esg(
+        cls,
+        entity_id: str,
+        benchmark_id: str = None,
+        pricing_date: dt.date = None,
+        measures: List[ESGMeasure] = [],
+        cards: List[ESGCard] = [],
+    ) -> Dict:
+        url = f"/esg/{entity_id}?"
         if pricing_date:
-            url += f'&date={pricing_date.strftime("%Y-%m-%d")}'
+            url += f"&date={pricing_date.strftime('%Y-%m-%d')}"
         if benchmark_id:
-            url += f'&benchmark={benchmark_id}'
-        for measure in measures:
-            url += f'&measure={measure}'
-        for card in cards:
-            url += f'&card={card}'
+            url += f"&benchmark={benchmark_id}"
+        # Ensure measures/cards are always lists even if None (prevents TypeError, matches previous empty default)
+        if measures:
+            url += "".join(f"&measure={measure}" for measure in measures)
+        if cards:
+            url += "".join(f"&card={card}" for card in cards)
 
         return GsSession.current._get(url)
