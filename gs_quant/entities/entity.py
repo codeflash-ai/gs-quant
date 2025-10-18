@@ -106,10 +106,10 @@ class Entity(metaclass=ABCMeta):
 
     def __init__(self,
                  id_: str,
-                 entity_type: EntityType,
+                 entity_type: 'EntityType',
                  entity: Optional[Dict] = None):
         self.__id: str = id_
-        self.__entity_type: EntityType = entity_type
+        self.__entity_type: 'EntityType' = entity_type
         self.__entity: Dict = entity
 
     @property
@@ -234,7 +234,10 @@ class Country(Entity):
         return get(self.get_entity(), 'regionCode')
 
     def get_sub_region_code(self):
-        return get(self.get_entity(), 'subRegionCode')
+        entity = self.get_entity()
+        if isinstance(entity, dict):
+            return entity.get('subRegionCode')
+        return None
 
     def get_alpha3(self):
         return get(self.get_entity(), 'xref.alpha3')
