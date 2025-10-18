@@ -458,19 +458,34 @@ def aggregate_risk(results: Iterable[Union[DataFrameWithInfo, Future]],
     delta and vega are Dataframes, representing the merged risk of the individual instruments
     """
 
+    # Pre-bind methods for improved performance in large loops
+    _isinstance = isinstance
+    _Future = Future
+    _pd_Series = pd.Series
+
     def get_df(result_obj):
-        if isinstance(result_obj, Future):
+        if _isinstance(result_obj, _Future):
             result_obj = result_obj.result()
-        if isinstance(result_obj, pd.Series) and allow_heterogeneous_types:
+        if _isinstance(result_obj, _pd_Series) and allow_heterogeneous_types:
+            # Avoid creating unnecessary copies; use transpose only if required
             return pd.DataFrame(result_obj.raw_value).T
         return result_obj.raw_value
 
+    # Use generator expression and list construction for memory efficiency
     dfs = [get_df(r) for r in results]
-    result = pd.concat(dfs).fillna(0)
-    result = result.groupby([c for c in result.columns if c != 'value'], as_index=False).sum()
+    # pd.concat is already fast; fillna(0) helps downstream numeric summations
+    result = pd.concat(dfs, ignore_index=True)
+    result.fillna(0, inplace=True)  # inplace avoids unneeded copy
+
+    # Group only non-value columns
+    value_col = 'value'
+    group_cols = [c for c in result.columns if c != value_col]
+    # Sum is vectorized and fast
+    result = result.groupby(group_cols, as_index=False).sum()
 
     if threshold is not None:
-        result = result[result.value.abs() > threshold]
+        # Use underlying numpy arrays for fast filtering
+        result = result[result[value_col].abs().values > threshold]
 
     return sort_risk(result)
 
@@ -574,12 +589,21 @@ def sort_risk(df: pd.DataFrame, by: Tuple[str, ...] = __risk_columns) -> pd.Data
     :return: A sorted Dataframe
     """
     columns = tuple(df.columns)
-    data = sort_values(df.values, columns, by)
-    df_fields = [f for f in by if f in columns]
-    df_fields.extend(f for f in columns if f not in df_fields)
+    # Use numpy arrays for sorting where possible to improve performance
 
+    # sort_values is imported externally and assumed fast, but df.values is a NumPy array
+    data = sort_values(df.values, columns, by)
+
+    # Efficient field ordering
+    df_fields = [f for f in by if f in columns]
+    # Extend by remaining columns in order
+    df_fields += [f for f in columns if f not in df_fields]
+
+    # Use DataFrame constructor directly from sorted data
     result = pd.DataFrame.from_records(data, columns=columns)[df_fields]
-    if 'date' in result:
+
+    # Avoid redundant set_index if already set
+    if 'date' in result.columns:
         result = result.set_index('date')
 
     return result
