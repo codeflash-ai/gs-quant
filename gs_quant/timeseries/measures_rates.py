@@ -1029,16 +1029,16 @@ def _get_swaption_measure(asset: Asset, benchmark_type: str = None, floating_rat
     _logger.debug(query)
 
     rate_mqid = _get_tdapi_rates_assets(**query, allow_many=allow_many)
+    # Only convert to list if it's not already a list
     if isinstance(rate_mqid, str):
         rate_mqid = [rate_mqid]
 
-    if location is None:
-        pricing_location = _default_pricing_location(currency)
-    else:
-        pricing_location = PricingLocation(location)
+    # Only set and normalize pricing_location if necessary
+    pricing_location = PricingLocation(location) if location is not None else _default_pricing_location(currency)
     pricing_location = _pricing_location_normalized(pricing_location, currency)
 
     where = dict(pricingLocation=pricing_location.value)
+    # Use DataContext only for duration necessary
     with DataContext(start, end):
         q = GsDataApi.build_market_data_query(rate_mqid, query_type, where=where, source=source,
                                               real_time=real_time)
