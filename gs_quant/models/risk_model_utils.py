@@ -79,9 +79,9 @@ def _map_measure_to_field_name(measure: Measure):
 def build_factor_id_to_name_map(results: List) -> dict:
     risk_model_factor_data = {}
     for row in results:
-        for factor in row.get('factorData', []):
+        for factor in row.get('factorData', ()):
             factor_id = factor['factorId']
-            if not risk_model_factor_data.get(factor_id):
+            if factor_id not in risk_model_factor_data:
                 risk_model_factor_data[factor_id] = factor['factorName']
     return risk_model_factor_data
 
