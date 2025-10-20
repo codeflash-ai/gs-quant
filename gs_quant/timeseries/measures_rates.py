@@ -998,12 +998,14 @@ def midcurve_atm_fwd_rate(asset: Asset, expiration_tenor: str, forward_tenor: st
     :param real_time: whether to retrieve intraday data instead of EOD
     :return: swaption implied normal volatility curve
     """
+    # The bottleneck is external data retrieval, so optimize local logic where possible.
     df = _get_swaption_measure(asset, benchmark_type=benchmark_type, floating_rate_tenor=floating_rate_tenor,
                                effective_date=forward_tenor, expiration_tenor=expiration_tenor,
                                termination_tenor=termination_tenor, clearing_house=clearing_house, source=source,
                                real_time=real_time, start=DataContext.current.start_date,
                                end=DataContext.current.end_date,
                                query_type=QueryType.MIDCURVE_ATM_FWD_RATE, location=location)
+    # _extract_series_from_df is already near optimal, return as is.
     return _extract_series_from_df(df, QueryType.MIDCURVE_ATM_FWD_RATE)
 
 
@@ -1018,8 +1020,8 @@ def _get_swaption_measure(asset: Asset, benchmark_type: str = None, floating_rat
                           location: PricingLocation = None) -> pd.Series:
     if real_time:
         raise NotImplementedError(f'realtime {query_type.value} not implemented')
-    currency = CurrencyEnum(asset.get_identifier(AssetIdentifier.BLOOMBERG_ID))
 
+    currency = CurrencyEnum(asset.get_identifier(AssetIdentifier.BLOOMBERG_ID))
     if not swaptions_defaults_provider.is_supported(currency):
         raise NotImplementedError(f'Data not available for {currency.value} {query_type.value}')
 
@@ -1032,10 +1034,7 @@ def _get_swaption_measure(asset: Asset, benchmark_type: str = None, floating_rat
     if isinstance(rate_mqid, str):
         rate_mqid = [rate_mqid]
 
-    if location is None:
-        pricing_location = _default_pricing_location(currency)
-    else:
-        pricing_location = PricingLocation(location)
+    pricing_location = _default_pricing_location(currency) if location is None else PricingLocation(location)
     pricing_location = _pricing_location_normalized(pricing_location, currency)
 
     where = dict(pricingLocation=pricing_location.value)
