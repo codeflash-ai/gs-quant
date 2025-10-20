@@ -57,89 +57,120 @@ def backtest_basket(
 
     if not all(isinstance(x, pd.Series) for x in series):
         raise MqTypeError("expected a list of series")
-
     if len(weights) != num_assets or len(weights) != len(costs):
         raise MqValueError("series, weights, and cost lists must have the same length")
 
     # For all inputs which are Pandas series, get the intersection of their calendars
-    cal = pd.DatetimeIndex(
-        reduce(
-            np.intersect1d,
-            (
-                curve.index
-                for curve in series + weights + costs
-                if isinstance(curve, pd.Series)
-            ),
-        )
-    )
+    # Optimize: avoid constructing generator for + if all are lists
+    all_curves = []
+    all_curves.extend(series)
+    all_curves.extend(weights)
+    all_curves.extend(costs)
+    pd_series = [curve for curve in all_curves if isinstance(curve, pd.Series)]
 
-    # Reindex inputs and convert to pandas dataframes
-    series = pd.concat([curve.reindex(cal) for curve in series], axis=1)
-    weights = pd.concat([pd.Series(w, index=cal) for w in weights], axis=1)
-    costs = pd.concat([pd.Series(c, index=cal) for c in costs], axis=1)
+    if not pd_series:
+        raise MqValueError("At least one input must be a pandas Series for calendar intersection")
 
+    cal = pd.DatetimeIndex(reduce(np.intersect1d, (curve.index for curve in pd_series)))  # type: ignore
+
+    # Pre-create weights/costs columns, fast path for constant entries
+    series_df = pd.concat([curve.reindex(cal) for curve in series], axis=1)
+    if all(not isinstance(w, pd.Series) for w in weights):
+        # All weights are scalars
+        weights_df = pd.DataFrame(np.tile(weights, (len(cal), 1)), index=cal)
+    else:
+        weights_df = pd.concat([
+            w.reindex(cal) if isinstance(w, pd.Series) else pd.Series(w, index=cal)
+            for w in weights
+        ], axis=1)
+    if all(not isinstance(c, pd.Series) for c in costs):
+        # All costs are scalars
+        costs_df = pd.DataFrame(np.tile(costs, (len(cal), 1)), index=cal)
+    else:
+        costs_df = pd.concat([
+            c.reindex(cal) if isinstance(c, pd.Series) else pd.Series(c, index=cal)
+            for c in costs
+        ], axis=1)
+
+    # Avoid repeated column lookups
+    series_vals = series_df.values
+    weights_vals = weights_df.values
+    costs_vals = costs_df.values
+    n_obs = len(cal)
+    n_assets = num_assets
+
+    # Rebalance date logic
     if rebal_freq == RebalFreq.DAILY:
         rebal_dates = cal
+        rebal_date_idx_set = set(range(n_obs))
     else:
         if rebal_freq == RebalFreq.WEEKLY:
-            # Get hypothetical weekly rebalances
             num_rebals = ((cal[-1] - cal[0]).days) // 7
-            rebal_dates = [cal[0] + i * rdelta(weeks=1) for i in range(num_rebals + 1)]
+            hypothetical = [cal[0] + i * rdelta(weeks=1) for i in range(num_rebals + 1)]
         else:
-            # Get hypothetical monthly rebalances
+            # Monthly
             num_rebals = (cal[-1].year - cal[0].year) * 12 + cal[-1].month - cal[0].month
-            rebal_dates = [cal[0] + i * rdelta(months=1) for i in range(num_rebals + 1)]
+            hypothetical = [cal[0] + i * rdelta(months=1) for i in range(num_rebals + 1)]
+        # Find closest calendar day on-or-after each hypothetical rebalance
+        cal_values = cal.values
+        cal_max = cal_values[-1]
+        rebal_date_idx = []
+        pointer = 0
+        hypotheticals_np = np.array(hypothetical, dtype='datetime64[ns]')
+        for hdate in hypotheticals_np:
+            # Only consider dates strictly within available calendar
+            if hdate > cal_max:
+                break
+            while pointer < len(cal_values) and cal_values[pointer] < hdate:
+                pointer += 1
+            if pointer < len(cal_values):
+                rebal_date_idx.append(pointer)
+        rebal_dates = cal[rebal_date_idx]
+        rebal_date_idx_set = set(rebal_date_idx)
 
-        # Convert the hypothetical weekly/monthly rebalance dates to actual calendar days
-        rebal_dates = [min(cal[cal >= date]) for date in rebal_dates if date < max(cal)]
+    # Pre-allocate outputs
+    output = np.empty(n_obs, dtype='float64')
+    units = np.empty((n_obs, n_assets), dtype='float64')
+    actual_weights = np.empty((n_obs, n_assets), dtype='float64')
 
-    # Create Units dataframe
-    units = pd.DataFrame(index=cal, columns=series.columns)
-    actual_weights = pd.DataFrame(index=cal, columns=series.columns)
-    output = pd.Series(dtype='float64', index=cal)
+    # Initialization
+    output[0] = 100.
+    units[0, :] = output[0] * weights_vals[0, :] / series_vals[0, :]
+    actual_weights[0, :] = weights_vals[0, :]
 
-    # Initialize backtest
-    output.values[0] = 100
-    units.values[0, ] = (
-        output.values[0] * weights.values[0, ] / series.values[0, ]
-    )
-    actual_weights.values[0, ] = weights.values[0, ]
-
-    # Run backtest
+    # Run backtest (tight loop, use arrays as much as possible)
     prev_rebal = 0
-    for i, date in enumerate(cal[1:], 1):
-        # Update performance
-        output.values[i] = output.values[i - 1] + np.dot(
-            units.values[i - 1, ], series.values[i, ] - series.values[i - 1, ]
+    for i in range(1, n_obs):
+        # Performance update
+        output[i] = output[i - 1] + np.dot(
+            units[i - 1, :], series_vals[i, :] - series_vals[i - 1, :]
         )
 
-        actual_weights.values[i, ] = (
-            weights.values[prev_rebal, ] *
-            (series.values[i, ] / series.values[prev_rebal, ]) *
-            (output.values[prev_rebal] / output.values[i])
+        actual_weights[i, :] = (
+            weights_vals[prev_rebal, :] *
+            (series_vals[i, :] / series_vals[prev_rebal, :]) *
+            (output[prev_rebal] / output[i])
         )
 
-        # Rebalance on rebal_dates
-        if date in rebal_dates:
-            # Compute costs
-            output.values[i] -= (
-                np.dot(costs.values[i, ], np.abs(weights.values[i, ] - actual_weights.values[i, ])) *
-                output.values[i]
-            )
-
-            # Rebalance
-            units.values[i, ] = (
-                output.values[i] * weights.values[i, ] / series.values[i, ]
-            )
+        # Rebalance on dates
+        if i in rebal_date_idx_set:
+            # Execution costs
+            cost = np.dot(
+                costs_vals[i, :],
+                np.abs(weights_vals[i, :] - actual_weights[i, :])
+            ) * output[i]
+            output[i] -= cost
+            # Update units
+            units[i, :] = output[i] * weights_vals[i, :] / series_vals[i, :]
             prev_rebal = i
-
-            actual_weights.values[i, ] = weights.values[i, ]
+            actual_weights[i, :] = weights_vals[i, :]
         else:
-            units.values[i, ] = units.values[
-                i - 1,
-            ]
+            units[i, :] = units[i - 1, :]
 
-    return output, actual_weights
+    output_series = pd.Series(output, index=cal)
+    actual_weights_df = pd.DataFrame(actual_weights, index=cal, columns=series_df.columns)
+
+    return output_series, actual_weights_df
 
 
 @plot_function
@@ -177,6 +208,14 @@ def basket_series(
 
     :func:`prices`
     """
+
+    # Default values for rebal_freq, return_type for runtime compatibility
+    if rebal_freq is None:
+        from gs_quant.timeseries.backtesting import RebalFreq
+        rebal_freq = RebalFreq.DAILY
+    if return_type is None:
+        from gs_quant.timeseries.backtesting import ReturnType
+        return_type = ReturnType.EXCESS_RETURN
 
     return backtest_basket(series, weights, costs, rebal_freq)[0]
 
