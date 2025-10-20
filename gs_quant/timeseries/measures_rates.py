@@ -37,6 +37,8 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_CURRENCY_TO_DEFAULT_BENCHMARK_TYPE = {}
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -564,33 +566,51 @@ def _check_term_structure_tenor(tenor_type: _SwapTenorType, tenor: str) -> Dict:
 
 
 def _get_benchmark_type(currency: CurrencyEnum, benchmark_type: BenchmarkType = None):
-    if benchmark_type is None:
-        if currency == CurrencyEnum.EUR:
-            benchmark_type = BenchmarkType.EURIBOR
-        elif currency == CurrencyEnum.SEK:
-            benchmark_type = BenchmarkType.STIBOR
-        else:
-            benchmark_type = BenchmarkType(str(list(CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value].keys())[0]))
-    benchmark_type_input = CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value][benchmark_type.value]
+    # Fast path for benchmark_type explicitly provided
+    if benchmark_type is not None:
+        # lookup with provided benchmark_type
+        return CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value][benchmark_type.value]
 
-    return benchmark_type_input
+    # Explicit EUR/SEK handling as fast conditional blocks
+    if currency is CurrencyEnum.EUR:
+        benchmark_type_val = BenchmarkType.EURIBOR
+        return CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value][benchmark_type_val.value]
+    if currency is CurrencyEnum.SEK:
+        benchmark_type_val = BenchmarkType.STIBOR
+        return CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value][benchmark_type_val.value]
+
+    # cached default benchmark_type per-currency (avoids list/dict traversal every time)
+    try:
+        benchmark_type_val = _CURRENCY_TO_DEFAULT_BENCHMARK_TYPE[currency]
+    except KeyError:
+        # Use next(iter(...)) for O(1) extraction of first key
+        first_key = next(iter(CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value]))
+        benchmark_type_val = BenchmarkType(str(first_key))
+        _CURRENCY_TO_DEFAULT_BENCHMARK_TYPE[currency] = benchmark_type_val
+
+    return CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value][benchmark_type_val.value]
 
 
 def _get_swap_leg_defaults(currency: CurrencyEnum, benchmark_type: Union[BenchmarkType, str] = None,
                            floating_rate_tenor: str = None) -> dict:
+    # pricing location lookup is already efficient (dict.get)
     pricing_location = CURRENCY_TO_PRICING_LOCATION.get(currency, PricingLocation.LDN)
-    # default benchmark types
-    if not isinstance(benchmark_type, str):
-        benchmark_type_input = _get_benchmark_type(currency, benchmark_type)
-    else:
-        benchmark_type_input = benchmark_type
-    # default floating index
-    if floating_rate_tenor is None:
-        if benchmark_type_input in BENCHMARK_TO_DEFAULT_FLOATING_RATE_TENORS:
-            floating_rate_tenor = BENCHMARK_TO_DEFAULT_FLOATING_RATE_TENORS[benchmark_type_input]
-        else:
-            raise MqValueError(f"{benchmark_type_input} has no default fixing tenor, please specify one")
 
+    # Determine benchmark_type_input efficiently
+    if isinstance(benchmark_type, str):
+        benchmark_type_input = benchmark_type
+    else:
+        # Only call _get_benchmark_type when necessary 
+        benchmark_type_input = _get_benchmark_type(currency, benchmark_type)
+
+    # Use dict.get for floating rate lookup, avoids double membership test
+    if floating_rate_tenor is None:
+        floating_rate_tenor_val = BENCHMARK_TO_DEFAULT_FLOATING_RATE_TENORS.get(benchmark_type_input)
+        if floating_rate_tenor_val is None:
+            raise MqValueError(f"{benchmark_type_input} has no default fixing tenor, please specify one")
+        floating_rate_tenor = floating_rate_tenor_val
+
+    # avoid redundant dict instantiation via direct literal (equivalent speed)
     return dict(currency=currency, benchmark_type=benchmark_type_input,
                 floating_rate_tenor=floating_rate_tenor, pricing_location=pricing_location)
 
