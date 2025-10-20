@@ -36,6 +36,7 @@ from gs_quant.timeseries.helper import _to_offset, check_forward_looking, plot_m
 from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing_date, \
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
+from functools import lru_cache
 
 
 # TODO: Use gs_quant object
@@ -1018,7 +1019,9 @@ def _get_swaption_measure(asset: Asset, benchmark_type: str = None, floating_rat
                           location: PricingLocation = None) -> pd.Series:
     if real_time:
         raise NotImplementedError(f'realtime {query_type.value} not implemented')
-    currency = CurrencyEnum(asset.get_identifier(AssetIdentifier.BLOOMBERG_ID))
+
+    currency_id = asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
+    currency = CurrencyEnum(currency_id)
 
     if not swaptions_defaults_provider.is_supported(currency):
         raise NotImplementedError(f'Data not available for {currency.value} {query_type.value}')
@@ -1032,11 +1035,13 @@ def _get_swaption_measure(asset: Asset, benchmark_type: str = None, floating_rat
     if isinstance(rate_mqid, str):
         rate_mqid = [rate_mqid]
 
-    if location is None:
-        pricing_location = _default_pricing_location(currency)
-    else:
-        pricing_location = PricingLocation(location)
-    pricing_location = _pricing_location_normalized(pricing_location, currency)
+    pricing_location = (
+        _cached_default_pricing_location(currency)
+        if location is None
+        else PricingLocation(location)
+    )
+    # Use cached normalization if possible
+    pricing_location = _cached_pricing_location_normalized(pricing_location.value, currency.value)
 
     where = dict(pricingLocation=pricing_location.value)
     with DataContext(start, end):
@@ -2214,3 +2219,16 @@ def policy_rate_term_structure_rt(asset: Asset, event_type: EventType = EventTyp
     if series.empty:  # Raise descriptive error if no data returned + date context is in the past
         check_forward_looking(None, source, 'policy_rate_term_structure')
     return series
+
+
+@lru_cache(maxsize=256)
+def _cached_default_pricing_location(ccy: CurrencyEnum) -> PricingLocation:
+    return _default_pricing_location(ccy)
+
+
+@lru_cache(maxsize=256)
+def _cached_pricing_location_normalized(location_value: str, ccy_value: str):
+    # Adapt the logic to use hashable cache keys
+    location = PricingLocation(location_value)
+    ccy = CurrencyEnum(ccy_value)
+    return _pricing_location_normalized(location, ccy)
