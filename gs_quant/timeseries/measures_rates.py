@@ -312,9 +312,9 @@ CURRENCY_TO_CSA_DEFAULT_MAP = {
 
 
 def _pricing_location_normalized(location: PricingLocation, ccy: CurrencyEnum) -> PricingLocation:
-    if location == PricingLocation.HKG or location == PricingLocation.TKO:
-        if ccy in CURRENCY_TO_PRICING_LOCATION.keys() and \
-                PricingLocation.HKG == CURRENCY_TO_PRICING_LOCATION.get(ccy, PricingLocation.LDN):
+    if location is PricingLocation.HKG or location is PricingLocation.TKO:
+        ccy_loc = CURRENCY_TO_PRICING_LOCATION.get(ccy)
+        if ccy_loc is PricingLocation.HKG:
             return PricingLocation.HKG
         else:
             return PricingLocation.TKO
