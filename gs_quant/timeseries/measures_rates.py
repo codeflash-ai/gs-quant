@@ -596,12 +596,14 @@ def _get_swap_leg_defaults(currency: CurrencyEnum, benchmark_type: Union[Benchma
 
 
 def _get_swap_csa_terms(curr: str, benchmark_type: str) -> dict:
-    euribor_index = CURRENCY_TO_SWAP_RATE_BENCHMARK['EUR'][BenchmarkType.EURIBOR.value]
-    usd_libor_index = CURRENCY_TO_SWAP_RATE_BENCHMARK['USD'][BenchmarkType.LIBOR.value]
-    estr_index = CURRENCY_TO_SWAP_RATE_BENCHMARK['EUR'][BenchmarkType.EUROSTR.value]
-    if benchmark_type in [euribor_index, usd_libor_index]:
+    if not hasattr(_get_swap_csa_terms, "_euribor_index"):
+        _get_swap_csa_terms._euribor_index = CURRENCY_TO_SWAP_RATE_BENCHMARK['EUR'][BenchmarkType.EURIBOR.value]
+        _get_swap_csa_terms._usd_libor_index = CURRENCY_TO_SWAP_RATE_BENCHMARK['USD'][BenchmarkType.LIBOR.value]
+        _get_swap_csa_terms._estr_index = CURRENCY_TO_SWAP_RATE_BENCHMARK['EUR'][BenchmarkType.EUROSTR.value]
+
+    if benchmark_type == _get_swap_csa_terms._euribor_index or benchmark_type == _get_swap_csa_terms._usd_libor_index:
         return {}
-    elif benchmark_type == estr_index:
+    elif benchmark_type == _get_swap_csa_terms._estr_index:
         return dict(csaTerms=curr + '-EuroSTR')
     else:
         return dict(csaTerms=curr + '-1')
