@@ -229,14 +229,21 @@ def build_factor_volatility_dataframe(results: List, group_by_name: bool, factor
 
 
 def get_closest_date_index(date: dt.date, dates: List[str], direction: str) -> int:
-    for i in range(50):
-        for index in range(len(dates)):
-            if direction == 'before':
-                next_date = (date - dt.timedelta(days=i)).strftime('%Y-%m-%d')
-            else:
-                next_date = (date + dt.timedelta(days=i)).strftime('%Y-%m-%d')
-            if next_date == dates[index]:
-                return index
+    # Use a set for O(1) lookup of date strings
+    dates_set = set(dates)
+    date_fmt = '%Y-%m-%d'
+    if direction == 'before':
+        # Precompute candidate dates in order of increasing i
+        for i in range(50):
+            next_date = (date - dt.timedelta(days=i)).strftime(date_fmt)
+            if next_date in dates_set:
+                # Find the corresponding index in original list to preserve behavior
+                return dates.index(next_date)
+    else:
+        for i in range(50):
+            next_date = (date + dt.timedelta(days=i)).strftime(date_fmt)
+            if next_date in dates_set:
+                return dates.index(next_date)
     return -1
 
 
