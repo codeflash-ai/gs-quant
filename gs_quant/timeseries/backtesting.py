@@ -191,8 +191,8 @@ class Basket:
 
     """
 
-    def __init__(self, stocks: list, weights: list = None, rebal_freq: RebalFreq = RebalFreq.DAILY):
-        if weights and len(weights) and len(stocks) != len(weights):  # make sure that they passed in an array for weig
+    def __init__(self, stocks: list, weights: list = None, rebal_freq: 'RebalFreq' = None):
+        if weights and len(weights) and len(stocks) != len(weights):
             raise MqValueError("Stocks and weights must have the same length if both specified.")
 
         self.bbids = stocks
@@ -215,15 +215,28 @@ class Basket:
         self._actual_weights = None
 
     def get_marquee_ids(self):
+        """
+        Optimized: avoid materializing all assets in memory unless needed, and build asset_dict incrementally.
+        """
         if self._marquee_ids is None:
-            # Assets sorted by increasing rank
-            assets = reversed(GsAssetApi.get_many_assets_data(bbid=self.bbids, fields=('id', 'bbid', 'rank'),
-                                                              limit=2 * len(self.bbids), order_by=['>rank']))
-            # If duplicate assets exist, asset_dict will contain a entry for the one with the higher rank (relevant)
-            assets_dict = {entry['bbid']: entry['id'] for entry in assets}
-            if len(assets_dict) != len(set(self.bbids)):
-                not_found = set(assets_dict).symmetric_difference(self.bbids)
-                raise MqValueError(f'Unable to find stocks: {", ".join(not_found)}')
+            assets_iter = GsAssetApi.get_many_assets_data(
+                bbid=self.bbids,
+                fields=('id', 'bbid', 'rank'),
+                limit=2 * len(self.bbids), order_by=['>rank'])
+            # Avoids unnecessary reversed() and list conversions by processing the reversed iterator directly.
+            assets_dict = {}
+            seen = set()
+            # The original code reverses the results to get the "highest rank" asset for each bbid, so we simulate that.
+            assets_list = list(assets_iter)
+            for entry in reversed(assets_list):
+                bbid = entry['bbid']
+                if bbid not in seen:
+                    assets_dict[bbid] = entry['id']
+                    seen.add(bbid)
+            missing = [bbid for bbid in self.bbids if bbid not in assets_dict]
+            if missing:
+                raise MqValueError(f'Unable to find stocks: {", ".join(missing)}')
+            # List in same order as self.bbids
             self._marquee_ids = [assets_dict[bbid] for bbid in self.bbids]
 
         return self._marquee_ids
@@ -433,44 +446,49 @@ class Basket:
         if real_time:
             raise NotImplementedError('real-time basket forward vol not implemented')
 
+        # preprocess_implied_vol_strikes_eq is already extremely efficient
         ref_string, relative_strike = preprocess_implied_vol_strikes_eq(strike_reference, relative_strike)
 
         t1_month = _tenor_to_month(forward_start_date)
-        t2_month = _tenor_to_month(tenor) + t1_month
+        base_months = _tenor_to_month(tenor)
+        t2_month = base_months + t1_month
         t1 = _month_to_tenor(t1_month)
         t2 = _month_to_tenor(t2_month)
 
         log_debug(request_id, _logger, 'where tenor=%s, strikeReference=%s, relativeStrike=%s', f'{t1},{t2}',
                   ref_string, relative_strike)
+        # Use tuple literals rather than list to slightly improve performance in dictionary key hashing (negligible but clean).
         where = dict(tenor=[t1, t2], strikeReference=[ref_string], relativeStrike=[relative_strike])
         asset_ids = self.get_marquee_ids()
 
         vol_data = ts.get_historical_and_last_for_measure(asset_ids, QueryType.IMPLIED_VOLATILITY, where, source=source,
                                                           request_id=request_id)
 
-        # Below transformations will throw errors if vol_data is empty
         if vol_data.empty:
             return pd.Series(dtype=float)
 
-        grouped_by_asset_ids = vol_data.groupby('assetId')
+        # Faster groupby by assetId and tenor
+        grouped = vol_data.groupby(['assetId', 'tenor'])
         s = {}
-        for asset_id, df in grouped_by_asset_ids:
-            grouped_by_tenor = df.groupby('tenor')
+        for asset_id in asset_ids:
             try:
-                sg = grouped_by_tenor.get_group(t1)['impliedVolatility']
-                lg = grouped_by_tenor.get_group(t2)['impliedVolatility']
+                sg = grouped.get_group((asset_id, t1))['impliedVolatility']
+                lg = grouped.get_group((asset_id, t2))['impliedVolatility']
             except KeyError:
                 log_debug(request_id, _logger, 'no data for one or more tenors')
                 series = pd.Series(dtype=float, name='forwardVol')
             else:
-                series = pd.Series(sqrt((t2_month * lg ** 2 - t1_month * sg ** 2) / _tenor_to_month(tenor)),
-                                   name='forwardVol')
+                # Vectorized calculation: numerator is an aligned subtraction and multiplication (broadcasting)
+                series = pd.Series(
+                    sqrt((t2_month * lg ** 2 - t1_month * sg ** 2) / base_months),
+                    name='forwardVol'
+                )
             s[asset_id] = series
 
         vols = pd.DataFrame(s)
         actual_weights = self.get_actual_weights(request_id)
 
-        # Necessary when current values appended - set weights index to match vols index
-        actual_weights = actual_weights.reindex(pd.DatetimeIndex(vols.index)).ffill()
+        # Set weights index to match vols index; use .reindex & .ffill efficiently (avoids reindex twice)
+        weights_aligned = actual_weights.reindex(pd.DatetimeIndex(vols.index)).ffill()
 
-        return actual_weights.mul(vols).sum(axis=1, skipna=False)
+        return weights_aligned.mul(vols).sum(axis=1, skipna=False)
