@@ -37,6 +37,12 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_SWAP_TENOR_PATTERN = re.compile(r'(\d+)([bdwmy])')
+
+_FWD_TENOR_ALT_PATTERN = re.compile(r'(imm[1-4]|frb[1-9]|ecb[1-9])')
+
+_FRB_TENOR_PATTERN = re.compile(r'(frb[1-9])')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -461,7 +467,7 @@ def _check_forward_tenor(forward_tenor) -> GENERIC_DATE:
     elif forward_tenor in ['Spot', 'spot', 'SPOT']:
         return '0b'
     elif not (_is_valid_relative_date_tenor(forward_tenor) or
-              re.fullmatch('(imm[1-4]|frb[1-9]|ecb[1-9])', forward_tenor)):
+              _FWD_TENOR_ALT_PATTERN.fullmatch(forward_tenor)):
         raise MqValueError('invalid forward tenor ' + forward_tenor)
     else:
         return forward_tenor
@@ -555,7 +561,7 @@ def _check_term_structure_tenor(tenor_type: _SwapTenorType, tenor: str) -> Dict:
         tenor = _check_forward_tenor(tenor)
         tenor_to_plot = 'terminationTenor'
         tenor_dataset_field = 'asset_parameters_effective_date'
-    elif not re.fullmatch('(\\d+)([bdwmy])', tenor) or re.fullmatch('(frb[1-9])', tenor):
+    elif not _SWAP_TENOR_PATTERN.fullmatch(tenor) or _FRB_TENOR_PATTERN.fullmatch(tenor):
         raise MqValueError('invalid swap tenor ' + tenor)
     else:
         tenor_to_plot = 'effectiveTenor'
