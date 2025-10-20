@@ -564,15 +564,21 @@ def _check_term_structure_tenor(tenor_type: _SwapTenorType, tenor: str) -> Dict:
 
 
 def _get_benchmark_type(currency: CurrencyEnum, benchmark_type: BenchmarkType = None):
+    # Cache the CURRENCY_TO_SWAP_RATE_BENCHMARK dict for local access
+    benchmark_dict = CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value]
+
     if benchmark_type is None:
         if currency == CurrencyEnum.EUR:
             benchmark_type = BenchmarkType.EURIBOR
         elif currency == CurrencyEnum.SEK:
             benchmark_type = BenchmarkType.STIBOR
         else:
-            benchmark_type = BenchmarkType(str(list(CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value].keys())[0]))
-    benchmark_type_input = CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value][benchmark_type.value]
+            # Avoid creating a list just to read the first key of an OrderedDict/dict
+            # Since Python 3.7+, dict preserves insertion order
+            first_key = next(iter(benchmark_dict))
+            benchmark_type = BenchmarkType(str(first_key))
 
+    benchmark_type_input = benchmark_dict[benchmark_type.value]
     return benchmark_type_input
 
 
