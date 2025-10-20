@@ -608,10 +608,15 @@ def _get_swap_csa_terms(curr: str, benchmark_type: str) -> dict:
 
 
 def _get_basis_swap_csa_terms(curr: str, payer_benchmark: str, receiver_benchmark: str) -> dict:
+    if not hasattr(_get_basis_swap_csa_terms, "_cached_indices"):
+        _get_basis_swap_csa_terms._cached_indices = (
+            CURRENCY_TO_SWAP_RATE_BENCHMARK['EUR'][BenchmarkType.EURIBOR.value],
+            CURRENCY_TO_SWAP_RATE_BENCHMARK['USD'][BenchmarkType.LIBOR.value],
+            CURRENCY_TO_SWAP_RATE_BENCHMARK['EUR'][BenchmarkType.EUROSTR.value]
+        )
+    euribor_index, usd_libor_index, estr_index = _get_basis_swap_csa_terms._cached_indices
+    
     benchmarks = [payer_benchmark, receiver_benchmark]
-    euribor_index: str = CURRENCY_TO_SWAP_RATE_BENCHMARK['EUR'][BenchmarkType.EURIBOR.value]
-    usd_libor_index: str = CURRENCY_TO_SWAP_RATE_BENCHMARK['USD'][BenchmarkType.LIBOR.value]
-    estr_index: str = CURRENCY_TO_SWAP_RATE_BENCHMARK['EUR'][BenchmarkType.EUROSTR.value]
     if (euribor_index in benchmarks) or (usd_libor_index in benchmarks):
         return {}  # different csaTerms after SOFR and ESTR transitions for a given asset
     elif estr_index in benchmarks:
