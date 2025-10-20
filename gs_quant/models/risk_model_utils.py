@@ -401,16 +401,16 @@ def _batch_input_data(input_data: dict, max_asset_size: int):
 
 
 def _batch_asset_input(input_data: dict, i: int, split_idx: int, split_num: int, target_universe_size: int) -> dict:
+    start_idx = i * split_idx
     end_idx = (i + 1) * split_idx if split_num != i + 1 else target_universe_size + 1
-    asset_data_subset = {'universe': input_data.get('universe')[i * split_idx:end_idx],
-                         'specificRisk': input_data.get('specificRisk')[i * split_idx:end_idx],
-                         'factorExposure': input_data.get('factorExposure')[i * split_idx:end_idx]}
+    asset_data_subset = {'universe': input_data['universe'][start_idx:end_idx],
+                         'specificRisk': input_data['specificRisk'][start_idx:end_idx],
+                         'factorExposure': input_data['factorExposure'][start_idx:end_idx]}
 
-    optional_fields = list(input_data.keys())
-    [optional_fields.remove(required_field) for required_field in ["universe", "specificRisk", "factorExposure"]]
-    for optional_input in optional_fields:
-        if input_data.get(optional_input):
-            asset_data_subset[optional_input] = input_data.get(optional_input)[i * split_idx:end_idx]
+    for optional_input in input_data:
+        if optional_input not in asset_data_subset:
+            if input_data.get(optional_input):
+                asset_data_subset[optional_input] = input_data.get(optional_input)[start_idx:end_idx]
     return asset_data_subset
 
 
