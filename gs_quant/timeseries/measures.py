@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -2591,25 +2593,35 @@ def _get_weight_for_bucket(asset, start_contract_range, end_contract_range, buck
 def _filter_by_bucket(df, bucket, holidays, region):
     # TODO: get frequency definition from SecDB
     timezone, peak_start, peak_end, weekends = _get_iso_data(region)
-    if bucket.lower() == '7x24':
+    bucket_l = bucket.lower()
+    if bucket_l == '7x24':
         pass
-    # offpeak: 11pm-7am & weekend & holiday
-    elif bucket.lower() == 'offpeak':
-        df = df.loc[df['date'].isin(holidays) |
-                    df['day'].isin(weekends) |
-                    (~df['date'].isin(holidays) & ~df['day'].isin(weekends) &
-                     ((df['hour'] < peak_start) | (df['hour'] > peak_end - 1)))]
-    # peak: 7am to 11pm on weekdays
-    elif bucket.lower() == 'peak':
-        df = df.loc[(~df['date'].isin(holidays)) & (~df['day'].isin(weekends)) & (df['hour'] > peak_start - 1) &
-                    (df['hour'] < peak_end)]
-    # 7x8: 11pm to 7am
-    elif bucket.lower() == '7x8':
-        df = df.loc[(df['hour'] < peak_start) | (df['hour'] > peak_end - 1)]
-    # 2x16h: weekends & holidays
-    elif bucket.lower() == '2x16h' or bucket.lower() == 'suh1x16':
-        df = df.loc[((df['date'].isin(holidays)) | df['day'].isin(weekends)) & ((df['hour'] > peak_start - 1) &
-                                                                                (df['hour'] < peak_end))]
+    elif bucket_l == 'offpeak':
+        # offpeak: 11pm-7am & weekend & holiday
+        # Use np.in1d for faster 'isin' operations and boolean array operations for filtering
+        date_is_holiday = np.in1d(df['date'], holidays)
+        day_is_weekend = np.in1d(df['day'], weekends)
+        hour_is_offpeak = (df['hour'].values < peak_start) | (df['hour'].values > peak_end - 1)
+        mask = date_is_holiday | day_is_weekend | (~date_is_holiday & ~day_is_weekend & hour_is_offpeak)
+        df = df.loc[mask]
+    elif bucket_l == 'peak':
+        # peak: 7am to 11pm on weekdays
+        date_is_holiday = np.in1d(df['date'], holidays)
+        day_is_weekend = np.in1d(df['day'], weekends)
+        hour_is_peak = (df['hour'].values > peak_start - 1) & (df['hour'].values < peak_end)
+        mask = (~date_is_holiday) & (~day_is_weekend) & hour_is_peak
+        df = df.loc[mask]
+    elif bucket_l == '7x8':
+        # 7x8: 11pm to 7am
+        hour_is_offpeak = (df['hour'].values < peak_start) | (df['hour'].values > peak_end - 1)
+        df = df.loc[hour_is_offpeak]
+    elif bucket_l == '2x16h' or bucket_l == 'suh1x16':
+        # 2x16h: weekends & holidays, between peak_start and peak_end
+        date_is_holiday = np.in1d(df['date'], holidays)
+        day_is_weekend = np.in1d(df['day'], weekends)
+        hour_is_peak = (df['hour'].values > peak_start - 1) & (df['hour'].values < peak_end)
+        mask = (date_is_holiday | day_is_weekend) & hour_is_peak
+        df = df.loc[mask]
     else:
         raise MqValueError('Invalid bucket: ' + bucket + '. Expected Value: peak, offpeak, 7x24, 7x8, 2x16h.')
     return df
