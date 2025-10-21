@@ -52,6 +52,12 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_month_name_to_index = {name: idx for idx, name in enumerate(calendar.month_name) if name}
+
+_month_abbr_to_index = {abbr: idx for idx, abbr in enumerate(calendar.month_abbr) if abbr}
+
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +869,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -2622,56 +2628,75 @@ def _string_to_date_interval(interval: str):
     :param interval: date-interval
     :return: start and end date
     """
-    if interval[-2:].isdigit():
+    # Avoid repeated lookups, improve speed for common path
+    global _COMMOD_CONTRACT_MONTH_CODES
+    try:
+        _COMMOD_CONTRACT_MONTH_CODES
+    except NameError:
+        from gs_quant.timeseries.measures import _COMMOD_CONTRACT_MONTH_CODES
+
+    interval_len = len(interval)
+    # Attempt to determine year from last 4 or 2 characters
+    if interval_len > 4 and interval[-4:].isdigit():
+        YS = interval[-4:]
+        year = int(YS)
+    elif interval[-2:].isdigit():
         YS = interval[-2:]
-        year = int("20" + YS) if int(YS) <= 51 else int("19" + YS)
+        year_value = int(YS)
+        year = int("20" + YS) if year_value <= 51 else int("19" + YS)
     else:
         return "Invalid year"
 
-    if len(interval) > 4 and interval[-4:].isdigit():
-        YS = interval[-4:]
-        year = int(YS)
-
     start_year = dt.date(year, 1, 1)
-    if len(interval) == 1 + len(YS):
-        if interval[0].upper() in _COMMOD_CONTRACT_MONTH_CODES:
-            month_index = _COMMOD_CONTRACT_MONTH_CODES.index(interval[0].upper()) + 1
+    YS_len = len(YS)
+    left_len = interval_len - YS_len
+
+    if interval_len == 1 + YS_len:
+        ch = interval[0].upper()
+        # Use 'find' rather than 'in' + 'index' to avoid double scanning
+        month_idx = _COMMOD_CONTRACT_MONTH_CODES.find(ch)
+        if month_idx != -1:
+            month_index = month_idx + 1
             start_date = dt.date(year, month_index, 1)
             end_date = dt.date(year, month_index, calendar.monthrange(year, month_index)[1])
         else:
             return "Invalid month"
-    elif (len(interval) == 2 + len(YS) and interval.isdigit()) or (
-            interval.casefold().startswith("Cal".casefold()) and len(interval) == 3 + len(YS)):
+    elif (interval_len == 2 + YS_len and interval.isdigit()) or (
+            interval.casefold().startswith("Cal".casefold()) and interval_len == 3 + YS_len):
         start_date = dt.date(year, 1, 1)
         end_date = dt.date(year, 12, 31)
-    elif len(interval) == 2 + len(YS):
+    elif interval_len == 2 + YS_len:
         if interval[0].isdigit():
             num = int(interval[0])
         else:
             return "Invalid num"
-        if interval[1].upper() == "Q":
+        ch = interval[1].upper()
+        if ch == "Q":
             if 1 <= num <= 4:
-                start_date = (start_year + relativedelta(months=+(3 * (num - 1))))
-                end_date = start_year + relativedelta(months=+(3 * num), days=-1)
+                months_delta = 3 * (num - 1)
+                start_date = start_year + relativedelta(months=+months_delta)
+                end_date = start_year + relativedelta(months=+(months_delta + 3), days=-1)
             else:
                 return "Invalid Quarter"
-        if interval[1].upper() == "H":
+        if ch == "H":
             if 1 <= num <= 2:
-                start_date = start_year + relativedelta(months=+(6 * (num - 1)))
-                end_date = start_year + relativedelta(months=+(6 * num), days=-1)
+                months_delta = 6 * (num - 1)
+                start_date = start_year + relativedelta(months=+months_delta)
+                end_date = start_year + relativedelta(months=+(months_delta + 6), days=-1)
             else:
                 return "Invalid Half Year"
-    elif len(interval) >= 3 + len(YS):
-        left = interval[0:len(interval) - len(YS)]
+    elif interval_len >= 3 + YS_len:
+        left = interval[:left_len]
         if left.isalpha():
-            if left in calendar.month_name:
-                month_index = {v: k for k, v in enumerate(calendar.month_name)}[left]
-            elif left in calendar.month_abbr:
-                month_index = {v: k for k, v in enumerate(calendar.month_abbr)}[left]
+            # Try abbr first, then full month name, both are cached in lookup dicts.
+            month_index = _month_abbr_to_index.get(left)
+            if month_index is None:
+                month_index = _month_name_to_index.get(left)
+            if month_index is not None:
+                start_date = dt.date(year, month_index, 1)
+                end_date = dt.date(year, month_index, calendar.monthrange(year, month_index)[1])
             else:
                 return "Invalid date code"
-            start_date = dt.date(year, month_index, 1)
-            end_date = dt.date(year, month_index, calendar.monthrange(year, month_index)[1])
         else:
             return "Invalid date code"
     else:
