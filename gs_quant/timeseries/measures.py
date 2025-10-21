@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -1834,14 +1836,32 @@ def _skew(df: MarketDataResponseFrame, relative_strike_col, iv_col, q_strikes, n
                     off this normalization. By default, we normalize skew for equities
                     and commodities but not for FX assets.
     """
-    curves = {k: v for k, v in df.groupby(relative_strike_col)}
-    if len(curves) < 3:
-        raise MqValueError('Skew not available for given inputs')
-    series = [curves[qs][iv_col] for qs in q_strikes]
+    # Optimize groupby by using get_group, which avoids building a dict of all groups
+    try:
+        grouped = df.groupby(relative_strike_col)
+        # Only build the required three groups, fail early if any q_strike group missing
+        series = []
+        for qs in q_strikes:
+            # Slightly faster than using curves dict because we short-circuit on missing group
+            try:
+                group = grouped.get_group(qs)
+            except KeyError:
+                raise MqValueError('Skew not available for given inputs')
+            series.append(group[iv_col])
+    except Exception as e:
+        # fall back to old logic if an unexpected error occurs (defensive programming)
+        # this ensures raised exceptions remain exactly the same for non-KeyError errors
+        curves = {k: v for k, v in df.groupby(relative_strike_col)}
+        if len(curves) < 3:
+            raise MqValueError('Skew not available for given inputs')
+        series = [curves[qs][iv_col] for qs in q_strikes]
+
     ext_series = ((series[0] - series[1]) / series[2]) if normalization_mode == NormalizationMode.NORMALIZED \
         else (series[0] - series[1])
     series = ExtendedSeries(ext_series)
-    series.index = pd.to_datetime(series.index)
+    # Avoid redundant index conversion: only convert if not already datetime
+    if not pd.api.types.is_datetime64_any_dtype(series.index):
+        series.index = pd.to_datetime(series.index)
     return series
 
 
