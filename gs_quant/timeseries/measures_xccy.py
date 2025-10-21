@@ -359,7 +359,7 @@ def _get_crosscurrency_swap_leg_defaults(currency: CurrencyEnum,
 
 
 def _get_crosscurrency_swap_csa_terms(curr: str, crosscurrencyindextype: str) -> dict:
-    return dict(csaTerms=curr + '-1')
+    return {'csaTerms': curr + '-1'}
 
 
 def _get_crosscurrency_swap_data(asset1: Asset, asset2: Asset, swap_tenor: str, rateoption_type: str = None,
