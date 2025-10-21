@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -1794,29 +1796,48 @@ def _get_skew_strikes(asset: Asset, strike_reference: SkewReference, distance: R
     :param distance: strike relative to reference.
     :return: list of relative strikes for computation, in specific order.
     """
-    if asset.asset_class == AssetClass.FX:
-        buffer = 1  # FX vol data is loaded later
-        if strike_reference == SkewReference.DELTA:
-            q_strikes = [0 - distance, distance, 0]
-        else:
-            raise MqValueError('strike_reference has to be delta to get skew for FX options')
-    else:
-        assert asset.asset_class in (AssetClass.Equity, AssetClass.Commod)
-        buffer = 0
-        if strike_reference == SkewReference.DELTA:
-            b = 50
-            q_strikes = [100 - distance, distance, b]
-        elif strike_reference == SkewReference.NORMALIZED:
-            b = 0
-            q_strikes = [b - distance, b + distance, b]
-        elif strike_reference:
-            b = 100
-            q_strikes = [b - distance, b + distance, b]
-        else:
-            raise MqTypeError("strike_reference required for equities")
 
-        if strike_reference != SkewReference.NORMALIZED:
-            q_strikes = [x / 100 for x in q_strikes]
+    asset_class = asset.asset_class
+
+    # Fast path for FX
+    if asset_class == AssetClass.FX:
+        buffer = 1  # FX vol data is loaded later
+        # Check DELTA reference up front to skip unnecessary conditional branch lookup
+        if strike_reference == SkewReference.DELTA:
+            return [0 - distance, distance, 0], buffer
+        raise MqValueError('strike_reference has to be delta to get skew for FX options')
+
+    # Fast membership test, skip building tuple
+    if not (asset_class is AssetClass.Equity or asset_class is AssetClass.Commod):
+        assert asset_class in (AssetClass.Equity, AssetClass.Commod)  # Retain assertion behavior
+
+    buffer = 0
+
+    # Since SkewReference is used multiple times,
+    # assign once for faster lookup
+    norm_ref = SkewReference.NORMALIZED
+    delta_ref = SkewReference.DELTA
+
+    # Use if-elif-else for explicit branching as per domain logic
+    if strike_reference == delta_ref:
+        b = 50
+        q_strikes = [100 - distance, distance, b]
+        normalize = True
+    elif strike_reference == norm_ref:
+        b = 0
+        q_strikes = [b - distance, b + distance, b]
+        normalize = False
+    elif strike_reference:
+        b = 100
+        q_strikes = [b - distance, b + distance, b]
+        normalize = True
+    else:
+        raise MqTypeError("strike_reference required for equities")
+
+    if normalize:
+        # List comprehensions are already efficient,
+        # but for three elements, manual division is faster and avoids list comprehension overhead.
+        q_strikes = [(q_strikes[0]) / 100, (q_strikes[1]) / 100, (q_strikes[2]) / 100]
 
     return q_strikes, buffer
 
