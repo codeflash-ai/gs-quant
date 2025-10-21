@@ -300,20 +300,6 @@ def _get_tdapi_crosscurrency_rates_assets(allow_many=False, **kwargs) -> Union[s
             del kwargs['asset_parameters_clearing_house']
             assets = GsAssetApi.get_many_assets(**kwargs)
 
-    # change order of basis swap legs and check if swap in dataset
-    if len(assets) == 0 and ('asset_parameters_payer_rate_option' in kwargs):  # flip legs
-        kwargs['asset_parameters_payer_rate_option'], kwargs['asset_parameters_receiver_rate_option'] = \
-            kwargs['asset_parameters_receiver_rate_option'], kwargs['asset_parameters_payer_rate_option']
-        if 'asset_parameters_payer_designated_maturity' in kwargs:
-            kwargs['asset_parameters_payer_designated_maturity'], kwargs[
-                'asset_parameters_receiver_designated_maturity'] = \
-                kwargs['asset_parameters_receiver_designated_maturity'], kwargs[
-                    'asset_parameters_payer_designated_maturity']
-        if 'asset_parameters_payer_currency' in kwargs:
-            kwargs['asset_parameters_payer_currency'], kwargs['asset_parameters_receiver_currency'] = \
-                kwargs['asset_parameters_receiver_currency'], kwargs['asset_parameters_payer_currency']
-        assets = GsAssetApi.get_many_assets(**kwargs)
-
     if len(assets) > 1:
         # term structure measures need multiple assets
         if ('asset_parameters_termination_date' not in kwargs) or (
