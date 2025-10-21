@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -1748,14 +1750,53 @@ def _process_forward_vol_term(asset: Asset, vol_series: pd.Series, vol_col: str,
         vol_df = pd.DataFrame(vol_series)
         latest = vol_series.attrs['latest'].date() if isinstance(vol_series.attrs['latest'],
                                                                  pd.Timestamp) else vol_series.attrs['latest']
-        vol_df['calTimeToExp'] = vol_df.apply(lambda row: (row.name.date() - latest).days / DAYS_IN_YEAR, axis=1)
-        vol_df['timeToExp'] = vol_df.apply(lambda row: np.busday_count(latest, row.name.date(), weekmask=cbd.weekmask,
-                                                                       holidays=cbd.holidays) / 252, axis=1)
-        vol_df['multiplier'] = sqrt(vol_df['calTimeToExp'] / vol_df['timeToExp'])
-        vol_df['fwdVol'] = sqrt(
-            (vol_df['timeToExp'] * (vol_df[vol_col] * vol_df['multiplier']) ** 2 -
-             vol_df['timeToExp'].shift(1) * (vol_df[vol_col].shift(1) * vol_df['multiplier'].shift(1)) ** 2) /
-            (vol_df['timeToExp'] - vol_df['timeToExp'].shift(1)))
+        # Vectorized calculations for performance
+        index_dates = vol_df.index if isinstance(vol_df.index, pd.DatetimeIndex) else pd.to_datetime(vol_df.index)
+        index_dates = index_dates.date if hasattr(index_dates, 'date') else index_dates
+
+        # Use numpy for date differences
+        arr_dates = np.array([d if isinstance(d, dt.date) else d.date() for d in index_dates])
+        delta_days = np.array([(d - latest).days for d in arr_dates])
+        calTimeToExp = delta_days / DAYS_IN_YEAR
+        vol_df['calTimeToExp'] = calTimeToExp
+
+        # For business day count use pandas' vectorized date_range (avoiding apply to boost speed)
+        hols = cbd.holidays
+        weekmask = cbd.weekmask
+        # Efficient business day count using numpy's busday_count on arrays
+        # This assumes all arr_dates are after latest; for dates before, busday_count gives negatives (expected behavior).
+        arr_dates_np = np.array([np.datetime64(d) for d in arr_dates])
+        latest_np = np.datetime64(latest)
+
+        # Vectorized busday_count calculation
+        timeToExp = np.busday_count(latest_np, arr_dates_np, weekmask=weekmask, holidays=hols) / 252.
+        vol_df['timeToExp'] = timeToExp
+
+        # Avoid division by zero and NaNs for sqrt, handle in place
+        # Also allow for vectorized operation on the 'multiplier' column
+        safe_timeToExp = np.where(timeToExp == 0, np.nan, timeToExp)
+        safe_calTimeToExp = np.where(calTimeToExp == 0, np.nan, calTimeToExp)
+        multiplier = sqrt(pd.Series(safe_calTimeToExp / safe_timeToExp, index=vol_df.index))
+        vol_df['multiplier'] = multiplier
+
+        # Compute fwdVol efficiently; precompute shifted arrays
+        T = vol_df['timeToExp'].values
+        Tm1 = np.roll(T, 1)
+        Tm1[0] = np.nan
+        v = vol_df[vol_col].values
+        vm1 = np.roll(v, 1)
+        vm1[0] = np.nan
+        m = vol_df['multiplier'].values
+        mm1 = np.roll(m, 1)
+        mm1[0] = np.nan
+
+        numer = T * (v * m) ** 2 - Tm1 * (vm1 * mm1) ** 2
+        denom = T - Tm1
+        # Avoid division by zero: Set denom=nan when zero to avoid infs
+        denom_no_zero = np.where(denom == 0, np.nan, denom)
+        fwdVol = sqrt(pd.Series(numer / denom_no_zero, index=vol_df.index))
+        vol_df['fwdVol'] = fwdVol
+
         ext_series = ExtendedSeries(vol_df['fwdVol'], name=series_name)[DataContext.current.start_date:
                                                                         DataContext.current.end_date]
         ext_series.dataset_ids = getattr(vol_series, 'dataset_ids', ())
@@ -2031,7 +2072,6 @@ def vol_term(asset: Asset, strike_reference: VolReference, relative_strike: Real
             pass  # Allow to fail since it's not required to compute end result
 
         dataset_ids.update(getattr(df, 'dataset_ids', ()))
-        # only if df_expiry not empty
         if not df_expiry.empty:
             dataset_ids.update(getattr(df_expiry, 'dataset_ids', ()))
 
@@ -2043,7 +2083,12 @@ def vol_term(asset: Asset, strike_reference: VolReference, relative_strike: Real
     else:
         df = df.loc[latest]
         cbd = _get_custom_bd(asset.exchange)
-        df = df.assign(expirationDate=df.index + df['tenor'].map(_to_offset) + cbd - cbd)
+        # Vectorized expirationDate computation
+        # Use pd.to_datetime for integer/frequency handling in map(_to_offset)
+        idx = df.index if isinstance(df.index, pd.DatetimeIndex) else pd.to_datetime(df.index)
+        offsets = df['tenor'].map(_to_offset)
+        expiration_dates = pd.to_datetime(idx) + offsets + cbd - cbd
+        df = df.assign(expirationDate=expiration_dates)
         series = df.set_index('expirationDate')['impliedVolatility']
 
     if df_expiry.empty:
