@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,17 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    # Fast path: avoid regex if format is definitely not matching "number followed by 'm'"
+    if tenor and tenor[-1] == 'm' and tenor[:-1].isdigit():
+        month = int(tenor[:-1])
+        if month % 12 == 0:
+            return str(month // 12) + 'y'
+        return tenor
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
