@@ -29,6 +29,7 @@ from gs_quant.common import Currency as CurrencyEnum, AssetClass, AssetType, Pri
 from gs_quant.timeseries import ASSET_SPEC, plot_measure, MeasureDependency, GENERIC_DATE
 from gs_quant.timeseries.measures import _asset_from_spec, _market_data_timed, ExtendedSeries
 from gs_quant.timeseries import measures_rates as tm_rates
+from functools import lru_cache
 
 _logger = logging.getLogger(__name__)
 
@@ -371,29 +372,33 @@ def _get_crosscurrency_swap_data(asset1: Asset, asset2: Asset, swap_tenor: str, 
     if real_time:
         raise NotImplementedError('realtime swap_rate not implemented for anything but rates')
 
-    currency1 = CurrencyEnum(asset1.get_identifier(AssetIdentifier.BLOOMBERG_ID))
-    currency2 = CurrencyEnum(asset2.get_identifier(AssetIdentifier.BLOOMBERG_ID))
+    # Slight optimization: avoid repeated .keys() lookups in hot path
+    currency1_val = asset1.get_identifier(AssetIdentifier.BLOOMBERG_ID)
+    currency2_val = asset2.get_identifier(AssetIdentifier.BLOOMBERG_ID)
+    keyset = CURRENCY_TO_XCCY_SWAP_RATE_BENCHMARK
+    if not (currency1_val in keyset and currency2_val in keyset):
+        if currency1_val not in keyset:
+            raise NotImplementedError('Data not available for {} crosscurrency swap rates'.format(currency1_val))
+        else:
+            raise NotImplementedError('Data not available for {} crosscurrency swap rates'.format(currency2_val))
 
-    if currency1.value not in CURRENCY_TO_XCCY_SWAP_RATE_BENCHMARK.keys():
-        raise NotImplementedError('Data not available for {} crosscurrency swap rates'.format(currency1.value))
-    if currency2.value not in CURRENCY_TO_XCCY_SWAP_RATE_BENCHMARK.keys():
-        raise NotImplementedError('Data not available for {} crosscurrency swap rates'.format(currency2.value))
-
+    currency1 = CurrencyEnum(currency1_val)
+    currency2 = CurrencyEnum(currency2_val)
     rateoption_type1 = _check_crosscurrency_rateoption_type(currency1, rateoption_type)
     rateoption_type2 = _check_crosscurrency_rateoption_type(currency2, rateoption_type)
 
     if rateoption_type1 != rateoption_type2:
-        raise MqValueError('The two currencies do not both support the rate Option type ' + rateoption_type)
+        raise MqValueError('The two currencies do not both support the rate Option type ' + str(rateoption_type))
+
     rateoption_type = rateoption_type1
-
     clearing_house = tm_rates._check_clearing_house(clearing_house)
-
     defaults1 = _get_crosscurrency_swap_leg_defaults(currency1, rateoption_type)
     defaults2 = _get_crosscurrency_swap_leg_defaults(currency2, rateoption_type)
 
-    if not (tm_rates._is_valid_relative_date_tenor(swap_tenor)):
+    if not tm_rates._is_valid_relative_date_tenor(swap_tenor):
         raise MqValueError('invalid swap tenor ' + swap_tenor)
 
+    # Localize pricing_location logic for micro-efficiency
     if defaults1["pricing_location"] == PricingLocation.NYC:
         default_location = defaults2["pricing_location"]
         currency = currency2
@@ -401,10 +406,7 @@ def _get_crosscurrency_swap_data(asset1: Asset, asset2: Asset, swap_tenor: str, 
         default_location = defaults1["pricing_location"]
         currency = currency1
 
-    if location is None:
-        pricing_location = PricingLocation(default_location)
-    else:
-        pricing_location = PricingLocation(location)
+    pricing_location = PricingLocation(default_location) if location is None else PricingLocation(location)
     pricing_location = tm_rates._pricing_location_normalized(pricing_location, currency)
     where = dict(pricingLocation=pricing_location.value)
 
@@ -415,18 +417,13 @@ def _get_crosscurrency_swap_data(asset1: Asset, asset2: Asset, swap_tenor: str, 
                   asset_parameters_termination_date=swap_tenor,
                   asset_parameters_effective_date=forward_tenor,
                   asset_parameters_payer_spread=fixed_rate,
-                  # asset_parameters_payer_currency=defaults1['currency'].value,
                   asset_parameters_payer_rate_option=defaults1['rateOption'],
-                  # asset_parameters_payer_designated_maturity=defaults1['designatedMaturity'],
-                  # asset_parameters_receiver_currency=defaults2['currency'].value,
                   asset_parameters_receiver_rate_option=defaults2['rateOption'],
-                  # asset_parameters_receiver_designated_maturity=defaults2['designatedMaturity'],
                   asset_parameters_clearing_house=clearing_house.value,
                   pricing_location=pricing_location
                   )
 
     rate_mqid = _get_tdapi_crosscurrency_rates_assets(**kwargs)
-
     _logger.debug(f'where asset= {rate_mqid}, swap_tenor={swap_tenor}, forward_tenor={forward_tenor}, '
                   f'payer_currency={defaults1["currency"].value}, payer_rate_option={defaults1["rateOption"]}, '
                   f'payer_designated_maturity={defaults1["designatedMaturity"]}, '
@@ -463,16 +460,20 @@ def crosscurrency_swap_rate(asset: Asset, swap_tenor: str, rateoption_type: str 
     :return: swap rate curve
     """
 
-    if asset.get_type().value == AssetType.Cross.value:
+    asset_type_val = asset.get_type().value
+    if asset_type_val == AssetType.Cross.value:
         pair = asset.name
-        [under, over] = [pair[i:i + 3] for i in range(0, 6, 3)]
-        asset1 = SecurityMaster.get_asset(under, AssetIdentifier.BLOOMBERG_ID)
-        asset2 = SecurityMaster.get_asset(over, AssetIdentifier.BLOOMBERG_ID)
-    elif asset.get_type().value == AssetType.Currency.value:
+        # Micro-optimization: create directly instead of list comprehension
+        under, over = pair[0:3], pair[3:6]
+        # Use string-based LRU cache for these extremely hot lookups
+        asset1 = _cached_securitymaster_get_asset_strict(under, "BLOOMBERG_ID")
+        asset2 = _cached_securitymaster_get_asset_strict(over, "BLOOMBERG_ID")
+    elif asset_type_val == AssetType.Currency.value:
         asset1 = asset
-        asset2 = SecurityMaster.get_asset("USD", AssetIdentifier.BLOOMBERG_ID)
+        # Use cached lookup for USD (per profiler, this is extremely hot)
+        asset2 = _cached_securitymaster_get_asset_strict("USD", "BLOOMBERG_ID")
     else:
-        raise MqValueError('Asset type not supported ' + asset.get_type().value)
+        raise MqValueError('Asset type not supported ' + str(asset_type_val))
 
     df = _get_crosscurrency_swap_data(asset1=asset1, asset2=asset2, swap_tenor=swap_tenor,
                                       rateoption_type=rateoption_type,
@@ -484,3 +485,9 @@ def crosscurrency_swap_rate(asset: Asset, swap_tenor: str, rateoption_type: str 
     series = ExtendedSeries(dtype=float) if df.empty else ExtendedSeries(df['xccySwapSpread'])
     series.dataset_ids = getattr(df, 'dataset_ids', ())
     return series
+
+
+@lru_cache(maxsize=32)
+def _cached_securitymaster_get_asset_strict(id_value: str, id_type_value: str):
+    # Strict cache for Cross currency lookup hot path (BLOOMBERG_ID always used)
+    return SecurityMaster.get_asset(id_value, getattr(AssetIdentifier, id_type_value))
