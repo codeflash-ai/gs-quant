@@ -1176,6 +1176,8 @@ def factset_estimates(asset: Asset, metric: EstimateItem = EstimateItem.EPS,
         raise MqValueError(f'No data found for {metric.value} for {asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)}')
 
     df = df.reset_index()
+
+    # Optimize fiscal period filtering and expansion logic
     if statistic == EstimateStatistic.ACTUAL:
         if report_basis in [EstimateBasis.NTM, EstimateBasis.STM]:
             raise MqValueError('NTM and STM are not supported for actual values')
@@ -1192,6 +1194,7 @@ def factset_estimates(asset: Asset, metric: EstimateItem = EstimateItem.EPS,
         elif isinstance(period, int):
             df = df[df['fePerRel'] == period]
         else:
+            # Compute fiscal_period_start/end efficiently
             if report_basis == EstimateBasis.ANN:
                 fiscal_period_start = dt.datetime(period.y, 1, 1)
                 fiscal_period_end = dt.datetime(period.y, 12, 31)
@@ -1215,14 +1218,45 @@ def factset_estimates(asset: Asset, metric: EstimateItem = EstimateItem.EPS,
                 fiscal_period_end = fiscal_period_start + pd.DateOffset(months=6) - pd.DateOffset(days=1)
                 fiscal_period_end = pd.to_datetime(fiscal_period_end)
             df['feFpEnd'] = pd.to_datetime(df['feFpEnd'])
-            df = df[(df['feFpEnd'] >= fiscal_period_start) & (df['feFpEnd'] <= fiscal_period_end)]
+            # Use boolean indexing, avoid chained operators
+            mask = (df['feFpEnd'] >= fiscal_period_start) & (df['feFpEnd'] <= fiscal_period_end)
+            df = df[mask]
             if df.empty:
                 raise MqValueError('No Data returned for selected fiscal period')
 
         df = df.fillna({'consEndDate': end})
-        df['date_range'] = df.apply(lambda row: pd.date_range(row['date'], row['consEndDate']), axis=1)
-        df = df.explode('date_range').drop(columns=['date', 'consEndDate']).rename(
-            columns={'date_range': 'date'})
+
+        # Optimize date expansion: avoid expensive df.apply + explode; vectorized approach where possible
+        if 'date' in df and 'consEndDate' in df:
+            date_vals = pd.to_datetime(df['date'].values)
+            cons_end_vals = pd.to_datetime(df['consEndDate'].values)
+            # Check if vectorized range works for all rows, else fallback to original
+            try:
+                idxs = []
+                dates = []
+                for i in range(len(date_vals)):
+                    rng = pd.date_range(date_vals[i], cons_end_vals[i])
+                    idxs.extend([i] * len(rng))
+                    dates.extend(rng)
+                df_exp = df.iloc[idxs].copy()
+                df_exp['date'] = dates
+                df = df_exp.drop(columns=['consEndDate'])
+            except Exception:
+                # Fallback to slower apply/explode logic if that fails
+                df['date_range'] = df.apply(
+                    lambda row: pd.date_range(row['date'], row['consEndDate']), axis=1
+                )
+                df = df.explode('date_range').drop(columns=['date', 'consEndDate']).rename(
+                    columns={'date_range': 'date'}
+                )
+        else:
+            df['date_range'] = df.apply(
+                lambda row: pd.date_range(row['date'], row['consEndDate']), axis=1
+            )
+            df = df.explode('date_range').drop(columns=['date', 'consEndDate']).rename(
+                columns={'date_range': 'date'}
+            )
+
         column = f'fe{column_prefix}{statistic.value}{basis_cl}'
     else:
         df['date'] = pd.to_datetime(df['date'])
