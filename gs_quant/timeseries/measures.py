@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -1746,16 +1748,42 @@ def _process_forward_vol_term(asset: Asset, vol_series: pd.Series, vol_col: str,
     else:
         cbd = _get_custom_bd(asset.exchange)
         vol_df = pd.DataFrame(vol_series)
+        # Avoid .apply over axis 1: precompute as vector for better performance
         latest = vol_series.attrs['latest'].date() if isinstance(vol_series.attrs['latest'],
                                                                  pd.Timestamp) else vol_series.attrs['latest']
-        vol_df['calTimeToExp'] = vol_df.apply(lambda row: (row.name.date() - latest).days / DAYS_IN_YEAR, axis=1)
-        vol_df['timeToExp'] = vol_df.apply(lambda row: np.busday_count(latest, row.name.date(), weekmask=cbd.weekmask,
-                                                                       holidays=cbd.holidays) / 252, axis=1)
-        vol_df['multiplier'] = sqrt(vol_df['calTimeToExp'] / vol_df['timeToExp'])
-        vol_df['fwdVol'] = sqrt(
-            (vol_df['timeToExp'] * (vol_df[vol_col] * vol_df['multiplier']) ** 2 -
-             vol_df['timeToExp'].shift(1) * (vol_df[vol_col].shift(1) * vol_df['multiplier'].shift(1)) ** 2) /
-            (vol_df['timeToExp'] - vol_df['timeToExp'].shift(1)))
+        index_dates = np.array([ts.date() for ts in vol_df.index])
+        latest_np = np.datetime64(latest)
+        calTimeToExp = (index_dates - latest).astype('timedelta64[D]').astype(float) / DAYS_IN_YEAR
+        vol_df['calTimeToExp'] = calTimeToExp
+
+        # Pre-compute timeToExp as a vectorized operation when possible
+        timeToExp = np.array([
+            np.busday_count(latest, d, weekmask=cbd.weekmask, holidays=cbd.holidays)
+            for d in index_dates
+        ]) / 252
+        vol_df['timeToExp'] = timeToExp
+
+        # To avoid chained computation, use array notation
+        multiplier = sqrt(vol_df['calTimeToExp'] / vol_df['timeToExp'])
+        vol_df['multiplier'] = multiplier
+
+        tte = vol_df['timeToExp'].values
+        tte1 = np.roll(tte, 1)
+        # Set first value to np.nan so diff uses shift
+        tte1[0] = np.nan
+        v = vol_df[vol_col].values
+        v1 = np.roll(v, 1)
+        v1[0] = np.nan
+        m = vol_df['multiplier'].values
+        m1 = np.roll(m, 1)
+        m1[0] = np.nan
+
+        num = tte * (v * m) ** 2 - tte1 * (v1 * m1) ** 2
+        denom = tte - tte1
+        with np.errstate(invalid='ignore', divide='ignore'):
+            fwdVol = np.sqrt(num / denom)
+        vol_df['fwdVol'] = fwdVol
+
         ext_series = ExtendedSeries(vol_df['fwdVol'], name=series_name)[DataContext.current.start_date:
                                                                         DataContext.current.end_date]
         ext_series.dataset_ids = getattr(vol_series, 'dataset_ids', ())
@@ -2392,18 +2420,22 @@ def var_term(asset: Asset, pricing_date: Optional[str] = None, forward_start_dat
         with DataContext(start, end):
             tenors = _var_swap_tenors(asset, request_id)
             sub_frames = []
-            for t in tenors:
-                diff = _tenor_to_month(t) - _tenor_to_month(forward_start_date)
+            # Use list comprehension to gather valid tenors for efficiency
+            for t, t_months in ((t, _tenor_to_month(t)) for t in tenors):
+                diff = t_months - _tenor_to_month(forward_start_date)
                 if diff < 1:
                     continue
                 t1 = _month_to_tenor(diff)
                 c = var_swap(asset, t1, forward_start_date, source=source, real_time=real_time)
                 dataset_ids.update(getattr(c, 'dataset_ids', ()))
-                c = c.to_frame()
-                if not c.empty:
-                    c['tenor'] = t1
-                    sub_frames.append(c)
-            df = pd.concat(sub_frames)
+                c_df = c.to_frame()
+                if not c_df.empty:
+                    c_df['tenor'] = t1
+                    sub_frames.append(c_df)
+            if sub_frames:
+                df = pd.concat(sub_frames)
+            else:
+                df = pd.DataFrame()
     else:
         asset_id = asset.get_marquee_id()
         today = dt.date.today()
@@ -2428,7 +2460,11 @@ def var_term(asset: Asset, pricing_date: Optional[str] = None, forward_start_dat
         _logger.info('selected pricing date %s', latest)
         df = df.loc[latest]
         cbd = _get_custom_bd(asset.exchange)
-        df.loc[:, Fields.EXPIRATION_DATE.value] = df.index + df[Fields.TENOR.value].map(_to_offset) + cbd - cbd
+        # Vectorized expiration calculation:
+        offsets = df[Fields.TENOR.value].map(_to_offset)
+        expiration_dates = df.index + offsets + cbd - cbd
+        df = df.copy()
+        df.loc[:, Fields.EXPIRATION_DATE.value] = expiration_dates
         df = df.set_index(Fields.EXPIRATION_DATE.value)
         df = df.sort_index()
         df = df.loc[DataContext.current.start_date: DataContext.current.end_date]
