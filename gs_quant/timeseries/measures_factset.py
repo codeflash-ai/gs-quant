@@ -1082,7 +1082,7 @@ class FiscalPeriod:
 
     @classmethod
     def from_dict(cls, obj):
-        return FiscalPeriod(y=obj.get('y'), p=obj.get('p'))
+        return FiscalPeriod(obj.get('y'), obj.get('p'))
 
 
 BASIC_MEASURES = [EstimateItem.EPS,
