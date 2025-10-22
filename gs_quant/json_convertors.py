@@ -68,8 +68,14 @@ def decode_date_tuple(blob: Tuple[str, ...]):
 
 
 def encode_date_tuple(values: Tuple[Optional[Union[str, dt.date]], ...]):
-    return tuple(encode_date_or_str(value) if isinstance(value, (str, dt.date)) else None for value in values) if \
-        values is not None else None
+    # Use direct generator in tuple for-loop for efficiency, avoid redundant isinstance tuple
+    if values is None:
+        return None
+    dt_date_type = dt.date
+    return tuple(
+        v.isoformat() if isinstance(v, dt_date_type) else v if isinstance(v, str) else None
+        for v in values
+    )
 
 
 def decode_iso_date_or_datetime(value: Any) -> Union[Tuple[DateOrDateTime, ...], DateOrDateTime]:
