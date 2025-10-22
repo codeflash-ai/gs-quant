@@ -120,5 +120,6 @@ class GsDataScreenApi:
         assert screen_id == screen.id_
 
         request_headers = {'Content-Type': 'application/json;charset=utf-8'}
-        return GsSession.current._put('/data/screens/{id}'.format(id=screen_id), screen,
+        endpoint = f'/data/screens/{screen_id}'
+        return GsSession.current._put(endpoint, screen,
                                       request_headers=request_headers, cls=AnalyticsScreen)
