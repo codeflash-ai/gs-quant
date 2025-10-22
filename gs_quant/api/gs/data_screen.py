@@ -66,7 +66,7 @@ class GsDataScreenApi:
 
         :return: None
         """
-        return GsSession.current._delete('/data/screens/{id}'.format(id=screen_id))
+        return GsSession.current._delete(f'/data/screens/{screen_id}')
 
     @classmethod
     def create_screen(cls, screen: AnalyticsScreen) -> AnalyticsScreen:
