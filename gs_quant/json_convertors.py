@@ -123,11 +123,20 @@ def decode_datetime_tuple(blob: Tuple[str, ...]):
 
 
 def __try_decode_valid_date_formats(value: str) -> Optional[dt.date]:
+    # Cache of previously encountered (value, format) that failed, to skip unnecessary work
+    # We use local static var to speed up repeated failures with same values
+    if not hasattr(__try_decode_valid_date_formats, "_failed_cache"):
+        __try_decode_valid_date_formats._failed_cache = set()
+    failed_cache = __try_decode_valid_date_formats._failed_cache
+
     for fmt in __valid_date_formats:
+        cache_key = (value, fmt)
+        if cache_key in failed_cache:
+            continue
         try:
             return dt.datetime.strptime(value, fmt).date()
         except ValueError:
-            pass
+            failed_cache.add(cache_key)
     return None
 
 
