@@ -32,7 +32,9 @@ DateOrDateTime = Union[dt.date, dt.datetime]
 
 
 def encode_date_or_str(value: Optional[Union[str, dt.date]]) -> Optional[str]:
-    return value.isoformat() if isinstance(value, dt.date) else value
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    return value
 
 
 def decode_optional_date(value: Optional[str]) -> Optional[dt.date]:
