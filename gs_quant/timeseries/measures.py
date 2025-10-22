@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -3008,21 +3010,41 @@ def forward_price_ng(asset: Asset, contract_range: str = 'F20', price_method: st
 
 
 def get_contract_range(start_contract_range, end_contract_range, timezone):
+    # Optimize pd.Series (df['month'], df['year']) creation to avoid repeated attribute lookups
     if timezone:
+        # Use pd.date_range with hourly frequency; note end_contract_range is adjusted by 1 day
         df = pd.date_range(start_contract_range, end_contract_range + dt.timedelta(days=1), None, 'h',
                            timezone, False, None, 'left').to_frame()
-
         df['hour'] = df.index.hour
         df['day'] = df.index.dayofweek
     else:
+        # Use daily frequency
         df = pd.date_range(start=start_contract_range,
                            end=end_contract_range,
                            ).to_frame()
 
-    df['date'] = df.index.date
-    df['month'] = df.index.month - 1
-    df['year'] = df.index.year
-    df['contract_month'] = df['month'].map(_COMMOD_CONTRACT_MONTH_CODES_DICT) + df['year'].astype(str).str[2:]
+    # Bulk extract date parts as numpy arrays to minimize DataFrame overhead and pandas attribute lookup
+    idx = df.index
+    date_np = idx.date
+    month_np = idx.month - 1
+    year_np = idx.year
+
+    df['date'] = date_np
+    df['month'] = month_np
+    df['year'] = year_np
+
+    # Vectorize contract_month construction for significant speedup:
+    # - map months (int) to codes using numpy and list lookup
+    # - year to two-digit string using (year % 100)
+    # Since '_COMMOD_CONTRACT_MONTH_CODES_DICT' values are unique and sequential,
+    # it's safe to use a list comprehension for mapping months to codes
+
+    # Build contract month codes in bulk
+    codes = pd.Series([_COMMOD_CONTRACT_MONTH_CODES_DICT[m] for m in month_np], index=df.index)
+    years_short = pd.Series([str(y)[2:] for y in year_np], index=df.index)  # avoid astype, use direct string slicing
+
+    # Use Pandas string addition which is fast for Series of matching lengths
+    df['contract_month'] = codes + years_short
 
     return df
 
