@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -3008,22 +3010,24 @@ def forward_price_ng(asset: Asset, contract_range: str = 'F20', price_method: st
 
 
 def get_contract_range(start_contract_range, end_contract_range, timezone):
-    if timezone:
-        df = pd.date_range(start_contract_range, end_contract_range + dt.timedelta(days=1), None, 'h',
-                           timezone, False, None, 'left').to_frame()
-
-        df['hour'] = df.index.hour
-        df['day'] = df.index.dayofweek
-    else:
-        df = pd.date_range(start=start_contract_range,
-                           end=end_contract_range,
-                           ).to_frame()
-
-    df['date'] = df.index.date
-    df['month'] = df.index.month - 1
-    df['year'] = df.index.year
-    df['contract_month'] = df['month'].map(_COMMOD_CONTRACT_MONTH_CODES_DICT) + df['year'].astype(str).str[2:]
-
+    # Use more efficient vectorized DataFrame construction and apply contract_month in a single step
+    dr = pd.date_range(start=start_contract_range, end=end_contract_range, tz=timezone)
+    # Create columns as numpy arrays for maximum efficiency
+    index = dr
+    dates = index.date
+    months = index.month - 1
+    years = index.year
+    # Map months using numpy for efficiency
+    contract_month_code = pd.Series(months).map(_COMMOD_CONTRACT_MONTH_CODES_DICT).to_numpy()
+    # Avoid .astype(str) + [2:] (which is slow); use list comprehension for entire column
+    year_suffix = [str(year)[2:] for year in years]
+    contract_month = [f'{code}{suffix}' for code, suffix in zip(contract_month_code, year_suffix)]
+    df = pd.DataFrame({
+        'date': dates,
+        'month': months,
+        'year': years,
+        'contract_month': contract_month
+    }, index=dr)
     return df
 
 
