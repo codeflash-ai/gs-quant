@@ -119,7 +119,10 @@ def decode_dict_date_value(value):
 
 
 def decode_datetime_tuple(blob: Tuple[str, ...]):
-    return tuple(optional_from_isodatetime(s) for s in blob) if isinstance(blob, (tuple, list)) else None
+    # Avoid generator expression overhead by using a list comprehension (faster in CPython when tuple is needed)
+    if isinstance(blob, (tuple, list)):
+        return tuple(map(optional_from_isodatetime, blob))
+    return None
 
 
 def __try_decode_valid_date_formats(value: str) -> Optional[dt.date]:
