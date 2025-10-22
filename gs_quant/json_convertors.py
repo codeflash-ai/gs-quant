@@ -21,12 +21,15 @@ from typing import Optional, Union, Iterable, Dict, Tuple, Any
 import pandas as pd
 from dataclasses_json import config
 from dateutil.parser import isoparse
+from functools import lru_cache
 
-__valid_date_formats = ('%Y-%m-%d',  # '2020-07-28'
-                        '%d%b%y',  # '28Jul20'
-                        '%d%b%Y',  # '28Jul2020'
-                        '%d-%b-%y',  # '28-Jul-20'
-                        '%d/%m/%Y')  # '28/07/2020
+__valid_date_formats = (
+    '%Y-%m-%d',    # '2020-07-28'
+    '%d%b%y',      # '28Jul20'
+    '%d%b%Y',      # '28Jul2020'
+    '%d-%b-%y',    # '28-Jul-20'
+    '%d/%m/%Y',    # '28/07/2020'
+)  # '28/07/2020
 
 DateOrDateTime = Union[dt.date, dt.datetime]
 
@@ -41,7 +44,7 @@ def decode_optional_date(value: Optional[str]) -> Optional[dt.date]:
     if value is None or isinstance(value, dt.date):
         return value
     elif isinstance(value, str):
-        decoded_date_str = __try_decode_valid_date_formats(value)
+        decoded_date_str = _decode_date_from_cache(value)
         if decoded_date_str is not None:
             return decoded_date_str
 
@@ -74,10 +77,12 @@ def encode_date_tuple(values: Tuple[Optional[Union[str, dt.date]], ...]):
 
 def decode_iso_date_or_datetime(value: Any) -> Union[Tuple[DateOrDateTime, ...], DateOrDateTime]:
     if isinstance(value, (tuple, list)):
+        # Using generator expression for slightly improved performance/memory profile.
         return tuple(decode_iso_date_or_datetime(v) for v in value)
     if isinstance(value, (dt.date, dt.datetime)):
         return value
     elif isinstance(value, str):
+        # For ISO date string, check length.
         if len(value) == 10:
             return decode_optional_date(value)
         else:
@@ -88,6 +93,7 @@ def decode_iso_date_or_datetime(value: Any) -> Union[Tuple[DateOrDateTime, ...],
 def optional_from_isodatetime(datetime: Union[str, dt.datetime, None]) -> Optional[dt.datetime]:
     if datetime is None or isinstance(datetime, dt.datetime):
         return datetime
+    # replace('Z', '') could potentially be unnecessary if not present; but leave as-is for behavioral preservation.
     return dt.datetime.fromisoformat(datetime.replace('Z', ''))
 
 
@@ -327,3 +333,13 @@ def dc_decode(*classes, name_field='class_type', allow_missing=False):
     mappings = ((_get_dc_type(cls, name_field, allow_missing), cls) for cls in classes)
     type_to_cls_map = dict((k, v) for k, v in mappings if k is not None)
     return _value_decoder(type_to_cls_map, None)
+
+
+@lru_cache(maxsize=1024)
+def _decode_date_from_cache(value: str) -> Optional[dt.date]:
+    for fmt in __valid_date_formats:
+        try:
+            return dt.datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
