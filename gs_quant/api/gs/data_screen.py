@@ -30,7 +30,7 @@ class GsDataScreenApi:
 
         :return: AnalyticsScreen tuple, a tuple containing each screen available to the user.
         """
-        return GsSession.current._get('/data/screens', cls=AnalyticsScreen)['results']
+        return tuple(GsSession.current._get('/data/screens', cls=AnalyticsScreen)['results'])
 
     @classmethod
     def get_screen(cls, screen_id: str) -> AnalyticsScreen:
