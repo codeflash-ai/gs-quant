@@ -104,9 +104,26 @@ def decode_dict_date_key(value):
 
 
 def decode_dict_date_key_or_float(value):
-    if value is not None:
-        return decode_dict_date_key(value) if isinstance(value, dict) else decode_float_or_str(value)
-    return None
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        # Avoid function call overhead by inlining decode_dict_date_key
+        fromisoformat = dt.date.fromisoformat
+        return {fromisoformat(d): v for d, v in value.items()}
+    # Avoid function call overhead by inlining decode_float_or_str
+    if value is None:
+        return value
+    elif isinstance(value, float):
+        return value
+    elif isinstance(value, int):
+        return float(value)
+    elif isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            # Assume it's a strike or similar, e.g. 'ATM'
+            return value
+    raise TypeError(f'Cannot convert {value} to float')
 
 
 def decode_dict_dict_date_key(value):
