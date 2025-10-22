@@ -97,9 +97,20 @@ class GsDataScreenApi:
 
         :return: Tuple of DataRow objects, each DataRow in the tuple is a row of filtered data from this screen.
         """
-        request_headers = {'Content-Type': 'application/json;charset=utf-8'}
-        return GsSession.current._post('/data/screens/{id}/filter'.format(id=screen_id), filter_request,
-                                       request_headers=request_headers, cls=DataRow)['results']
+        # Move string interpolation outside the _post call to minimize string formatting cost
+        endpoint = f'/data/screens/{screen_id}/filter'
+        # Use a static headers object to avoid recreating the dict on every call
+        # This is safe since we're not mutating headers, and the contents never change
+        # (Header is a constant)
+        static_headers = {'Content-Type': 'application/json;charset=utf-8'}
+        # Avoid repeated attribute lookup or method call
+        post_method = GsSession.current._post
+        return post_method(
+            endpoint,
+            filter_request,
+            request_headers=static_headers,
+            cls=DataRow
+        )['results']
 
     @classmethod
     def update_screen(cls, screen_id: str, screen: AnalyticsScreen) -> AnalyticsScreen:
