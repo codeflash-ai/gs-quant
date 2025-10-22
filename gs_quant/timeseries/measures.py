@@ -52,6 +52,12 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_month_name_to_idx = {name: idx for idx, name in enumerate(calendar.month_name) if name}
+
+_month_abbr_to_idx = {abbr: idx for idx, abbr in enumerate(calendar.month_abbr) if abbr}
+
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +869,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -2622,54 +2628,77 @@ def _string_to_date_interval(interval: str):
     :param interval: date-interval
     :return: start and end date
     """
+    # Profiled: most time spent in month/abbr lookups. Precompute tables above.
+
+    l_interval = len(interval)
+    
+    # Assess for 2-digit year at end
     if interval[-2:].isdigit():
         YS = interval[-2:]
-        year = int("20" + YS) if int(YS) <= 51 else int("19" + YS)
+        yint = int(YS)
+        if yint <= 51:
+            year = 2000 + yint
+        else:
+            year = 1900 + yint
     else:
         return "Invalid year"
 
-    if len(interval) > 4 and interval[-4:].isdigit():
+    # Assess for 4-digit year at end, preferred if present
+    if l_interval > 4 and interval[-4:].isdigit():
         YS = interval[-4:]
         year = int(YS)
 
     start_year = dt.date(year, 1, 1)
-    if len(interval) == 1 + len(YS):
-        if interval[0].upper() in _COMMOD_CONTRACT_MONTH_CODES:
-            month_index = _COMMOD_CONTRACT_MONTH_CODES.index(interval[0].upper()) + 1
+    len_YS = len(YS)
+
+    # Month code (e.g. F07)
+    if l_interval == 1 + len_YS:
+        c = interval[0].upper()
+        idx = _COMMOD_CONTRACT_MONTH_CODES.find(c)
+        if idx != -1:
+            month_index = idx + 1
+            # dt.date and calendar.monthrange are fast, leave as is
             start_date = dt.date(year, month_index, 1)
             end_date = dt.date(year, month_index, calendar.monthrange(year, month_index)[1])
         else:
             return "Invalid month"
-    elif (len(interval) == 2 + len(YS) and interval.isdigit()) or (
-            interval.casefold().startswith("Cal".casefold()) and len(interval) == 3 + len(YS)):
+    # Yearly code, e.g. Cal07 or 2007
+    elif (l_interval == 2 + len_YS and interval.isdigit()) or (
+            interval.casefold().startswith("cal") and l_interval == 3 + len_YS):
         start_date = dt.date(year, 1, 1)
         end_date = dt.date(year, 12, 31)
-    elif len(interval) == 2 + len(YS):
+    # Quarter/Half-Year
+    elif l_interval == 2 + len_YS:
         if interval[0].isdigit():
             num = int(interval[0])
         else:
             return "Invalid num"
-        if interval[1].upper() == "Q":
+        c = interval[1].upper()
+        if c == "Q":
             if 1 <= num <= 4:
-                start_date = (start_year + relativedelta(months=+(3 * (num - 1))))
-                end_date = start_year + relativedelta(months=+(3 * num), days=-1)
+                off = 3 * (num - 1)
+                start_date = start_year + relativedelta(months=+off)
+                end_date = start_year + relativedelta(months=+3 * num, days=-1)
             else:
                 return "Invalid Quarter"
-        if interval[1].upper() == "H":
+        if c == "H":
             if 1 <= num <= 2:
-                start_date = start_year + relativedelta(months=+(6 * (num - 1)))
-                end_date = start_year + relativedelta(months=+(6 * num), days=-1)
+                off = 6 * (num - 1)
+                start_date = start_year + relativedelta(months=+off)
+                end_date = start_year + relativedelta(months=+6 * num, days=-1)
             else:
                 return "Invalid Half Year"
-    elif len(interval) >= 3 + len(YS):
-        left = interval[0:len(interval) - len(YS)]
+    # Month string
+    elif l_interval >= 3 + len_YS:
+        left = interval[0:l_interval - len_YS]
         if left.isalpha():
-            if left in calendar.month_name:
-                month_index = {v: k for k, v in enumerate(calendar.month_name)}[left]
-            elif left in calendar.month_abbr:
-                month_index = {v: k for k, v in enumerate(calendar.month_abbr)}[left]
-            else:
+            # Fast dict lookups
+            idx = _month_name_to_idx.get(left, None)
+            if idx is None:
+                idx = _month_abbr_to_idx.get(left, None)
+            if idx is None:
                 return "Invalid date code"
+            month_index = idx
             start_date = dt.date(year, month_index, 1)
             end_date = dt.date(year, month_index, calendar.monthrange(year, month_index)[1])
         else:
@@ -2789,12 +2818,15 @@ def fair_price(asset: Asset, tenor: str = None, *,
 
 
 def _get_start_and_end_dates(contract_range: str) -> (int, int):
-    start_date_interval = _string_to_date_interval(contract_range.split("-")[0])
+    # Avoid repeated string splits for hyphened range
+    # (Small speedup for repetitive calls, mainly for clarity here.)
+    parts = contract_range.split("-", 1)
+    start_date_interval = _string_to_date_interval(parts[0])
     if isinstance(start_date_interval, str):
         raise MqValueError(start_date_interval)
     start_contract_range = start_date_interval['start_date']
-    if "-" in contract_range:
-        end_date_interval = _string_to_date_interval(contract_range.split("-")[1])
+    if len(parts) == 2:
+        end_date_interval = _string_to_date_interval(parts[1])
         if isinstance(end_date_interval, str):
             raise MqValueError(end_date_interval)
         end_contract_range = end_date_interval['end_date']
