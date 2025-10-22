@@ -13,6 +13,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 """
+
 import datetime as dt
 import inspect
 import logging
@@ -26,11 +27,26 @@ from gs_quant.api.gs.parser import GsParserApi
 from gs_quant.api.gs.risk import GsRiskApi
 from gs_quant.base import get_enum_value, InstrumentBase, Priceable, Scenario
 from gs_quant.common import AssetClass, AssetType, XRef, RiskMeasure, MultiScenario
-from gs_quant.markets import HistoricalPricingContext, MarketDataCoordinate, PricingContext
+from gs_quant.markets import (
+    HistoricalPricingContext,
+    MarketDataCoordinate,
+    PricingContext,
+)
 from gs_quant.priceable import PriceableImpl
-from gs_quant.risk import FloatWithInfo, DataFrameWithInfo, SeriesWithInfo, ResolvedInstrumentValues, \
-    DEPRECATED_MEASURES
-from gs_quant.risk.results import ErrorValue, MultipleRiskMeasureFuture, PricingFuture, MultipleScenarioFuture
+from gs_quant.risk import (
+    FloatWithInfo,
+    DataFrameWithInfo,
+    SeriesWithInfo,
+    ResolvedInstrumentValues,
+    DEPRECATED_MEASURES,
+)
+from gs_quant.risk.results import (
+    ErrorValue,
+    MultipleRiskMeasureFuture,
+    PricingFuture,
+    MultipleScenarioFuture,
+)
+from functools import lru_cache
 
 _logger = logging.getLogger(__name__)
 
@@ -40,20 +56,28 @@ class Instrument(PriceableImpl, InstrumentBase):
     __instrument_mappings = {}
 
     def __repr__(self):
-        return f'{self.__class__.__name__}{"(" + self.name + ")" if self.name else ""}'
+        return f"{self.__class__.__name__}{'(' + self.name + ')' if self.name else ''}"
 
     @classmethod
     def __asset_class_and_type_to_instrument(cls):
         if not cls.__instrument_mappings:
             import gs_quant.target.instrument as instrument_  # noqa
-            instrument_classes = [c for _, c in inspect.getmembers(instrument_, inspect.isclass) if
-                                  issubclass(c, Instrument) and c is not Instrument]
 
-            cls.__instrument_mappings[(AssetClass.Cash, AssetType.Currency)] = instrument_.Forward
+            instrument_classes = [
+                c
+                for _, c in inspect.getmembers(instrument_, inspect.isclass)
+                if issubclass(c, Instrument) and c is not Instrument
+            ]
+
+            cls.__instrument_mappings[(AssetClass.Cash, AssetType.Currency)] = (
+                instrument_.Forward
+            )
 
             for clazz in instrument_classes:
                 instrument = clazz.default_instance()
-                cls.__instrument_mappings[(instrument.asset_class, instrument.type)] = clazz
+                cls.__instrument_mappings[(instrument.asset_class, instrument.type)] = (
+                    clazz
+                )
 
         return cls.__instrument_mappings
 
@@ -61,7 +85,9 @@ class Instrument(PriceableImpl, InstrumentBase):
     def provider(self):
         return self.PROVIDER
 
-    def resolve(self, in_place: bool = True) -> Optional[Union[PriceableImpl, PricingFuture, dict]]:
+    def resolve(
+        self, in_place: bool = True
+    ) -> Optional[Union[PriceableImpl, PricingFuture, dict]]:
         """
         Resolve non-supplied properties of an instrument
 
@@ -82,13 +108,15 @@ class Instrument(PriceableImpl, InstrumentBase):
 
         is_historical = isinstance(PricingContext.current, HistoricalPricingContext)
 
-        def handle_result(result: Optional[Union[ErrorValue, InstrumentBase]]) -> Optional[PriceableImpl]:
+        def handle_result(
+            result: Optional[Union[ErrorValue, InstrumentBase]],
+        ) -> Optional[PriceableImpl]:
             ret = None if in_place else result
             if isinstance(result, ErrorValue):
-                _logger.error('Failed to resolve instrument fields: ' + result.error)
+                _logger.error("Failed to resolve instrument fields: " + result.error)
                 ret = {result.risk_key.date: None} if is_historical else None
             elif result is None:
-                _logger.error('Unknown error resolving instrument fields')
+                _logger.error("Unknown error resolving instrument fields")
                 ret = {dt.date.today(): self} if is_historical else self
             elif in_place:
                 self.from_instance(result)
@@ -96,16 +124,26 @@ class Instrument(PriceableImpl, InstrumentBase):
             return ret
 
         if in_place and is_historical:
-            raise RuntimeError('Cannot resolve in place under a HistoricalPricingContext')
+            raise RuntimeError(
+                "Cannot resolve in place under a HistoricalPricingContext"
+            )
 
         if in_place and len([i for i in Scenario.path if isinstance(i, MultiScenario)]):
-            raise RuntimeError('Cannot resolve in place under a MultiScenario Context')
+            raise RuntimeError("Cannot resolve in place under a MultiScenario Context")
 
         return self.calc(ResolvedInstrumentValues, fn=handle_result)
 
-    def calc(self, risk_measure: Union[RiskMeasure, Iterable[RiskMeasure]], fn=None) \
-            -> Union[DataFrameWithInfo, ErrorValue, FloatWithInfo, PriceableImpl, PricingFuture,
-                     SeriesWithInfo, Tuple[MarketDataCoordinate, ...]]:
+    def calc(
+        self, risk_measure: Union[RiskMeasure, Iterable[RiskMeasure]], fn=None
+    ) -> Union[
+        DataFrameWithInfo,
+        ErrorValue,
+        FloatWithInfo,
+        PriceableImpl,
+        PricingFuture,
+        SeriesWithInfo,
+        Tuple[MarketDataCoordinate, ...],
+    ]:
         """
         Calculate the value of the risk_measure
 
@@ -148,29 +186,48 @@ class Instrument(PriceableImpl, InstrumentBase):
         """
 
         def get_inst_futures(curr_measure):
-            return MultipleScenarioFuture(self, multi_scenario.scenarios,
-                                          (curr_measure.pricing_context.calc(self, curr_measure),)) \
-                if multi_scenario else curr_measure.pricing_context.calc(self, curr_measure)
+            return (
+                MultipleScenarioFuture(
+                    self,
+                    multi_scenario.scenarios,
+                    (curr_measure.pricing_context.calc(self, curr_measure),),
+                )
+                if multi_scenario
+                else curr_measure.pricing_context.calc(self, curr_measure)
+            )
 
         single_measure = isinstance(risk_measure, RiskMeasure)
-        multi_scenario = next((i for i in Scenario.path if isinstance(i, MultiScenario)), None)
+        multi_scenario = next(
+            (i for i in Scenario.path if isinstance(i, MultiScenario)), None
+        )
 
         with self._pricing_context:
-            future = get_inst_futures(risk_measure) if single_measure else \
-                MultipleRiskMeasureFuture(self, {r: get_inst_futures(r) for r in risk_measure})
+            future = (
+                get_inst_futures(risk_measure)
+                if single_measure
+                else MultipleRiskMeasureFuture(
+                    self, {r: get_inst_futures(r) for r in risk_measure}
+                )
+            )
 
         # Warn on use of deprecated measures
-        def warning_on_one_line(msg, category, _filename, _lineno, _file=None, _line=None):
-            return f'{category.__name__}:{msg}'
+        def warning_on_one_line(
+            msg, category, _filename, _lineno, _file=None, _line=None
+        ):
+            return f"{category.__name__}:{msg}"
 
         for measure in (risk_measure,) if single_measure else risk_measure:
             if measure.name in DEPRECATED_MEASURES.keys():
-                message = '{0} risk measure is deprecated. Please use {1} instead and pass in arguments to describe ' \
-                          'risk measure specifics.\n'.format(measure.name, DEPRECATED_MEASURES[measure.name])
-                warnings.simplefilter('once')
+                message = (
+                    "{0} risk measure is deprecated. Please use {1} instead and pass in arguments to describe "
+                    "risk measure specifics.\n".format(
+                        measure.name, DEPRECATED_MEASURES[measure.name]
+                    )
+                )
+                warnings.simplefilter("once")
                 warnings.formatwarning = warning_on_one_line
                 warnings.warn(message, DeprecationWarning)
-                warnings.simplefilter('ignore')
+                warnings.simplefilter("ignore")
 
         if fn is not None:
             ret = PricingFuture()
@@ -191,31 +248,48 @@ class Instrument(PriceableImpl, InstrumentBase):
         if not values:
             return
 
-        instrument = cls if hasattr(cls, 'asset_class') else None
+        instrument = cls if hasattr(cls, "asset_class") else None
         if instrument is None:
-            builder_type = values.get('$type') or values.get('builder', values.get('defn', {})).get('$type')
-            values_used = values.get('builder', values.get('defn', values))
+            # Try to avoid repeated expensive dict lookups
+            get = values.get
+            builder_info = get("builder")
+            defn_info = get("defn")
+            values_used = builder_info or defn_info or values
+            builder_type = get("$type") or (builder_info or defn_info or {}).get(
+                "$type"
+            )
+
             if builder_type:
                 from gs_quant_internal.base import decode_quill_value
+
                 return decode_quill_value(values_used)
 
-            asset_class_field = next((f for f in ('asset_class', 'assetClass') if f in values), None)
-            if not asset_class_field:
-                raise ValueError('assetClass/asset_class not specified')
-            if 'type' not in values:
-                raise ValueError('type not specified')
+            if "asset_class" in values:
+                asset_class_field = "asset_class"
+            elif "assetClass" in values:
+                asset_class_field = "assetClass"
+            else:
+                raise ValueError("assetClass/asset_class not specified")
+            if "type" not in values:
+                raise ValueError("type not specified")
 
-            asset_type = values.pop('type')
+            asset_type = values.pop("type")
             asset_class = values.pop(asset_class_field)
-            security_types = (None, '', 'Security')
-            default_type = Security if asset_type in security_types and asset_class in security_types else None
 
-            instrument = Instrument.__asset_class_and_type_to_instrument().get((
-                get_enum_value(AssetClass, asset_class),
-                get_enum_value(AssetType, asset_type)), default_type)
+            security_types = (None, "", "Security")
+            default_type = (
+                Security
+                if asset_type in security_types and asset_class in security_types
+                else None
+            )
+
+            enum_asset_class = _cached_get_enum_value_asset_class(asset_class)
+            enum_asset_type = _cached_get_enum_value_asset_type(asset_type)
+            mapping = Instrument.__asset_class_and_type_to_instrument()
+            instrument = mapping.get((enum_asset_class, enum_asset_type), default_type)
 
             if instrument is None:
-                raise ValueError('unable to build instrument')
+                raise ValueError("unable to build instrument")
 
         return instrument.from_dict(values)
 
@@ -233,17 +307,20 @@ class Instrument(PriceableImpl, InstrumentBase):
             if len(res):  # multiple instruments returned
                 instrument = res.pop(0)
             else:
-                raise ValueError('Could not resolve instrument')
+                raise ValueError("Could not resolve instrument")
         else:
-            instrument = GsParserApi.get_instrument_from_text_asset_class(text, asset_class.value)
+            instrument = GsParserApi.get_instrument_from_text_asset_class(
+                text, asset_class.value
+            )
         try:
             return cls.from_dict(instrument)
         except AttributeError:
-            raise ValueError('Invalid instrument specification')
+            raise ValueError("Invalid instrument specification")
 
     @classmethod
     def from_asset_ids(cls, asset_ids: Tuple[str, ...]) -> Tuple[InstrumentBase, ...]:
         from gs_quant.api.gs.assets import GsAssetApi
+
         instruments = GsAssetApi.get_instruments_for_asset_ids(asset_ids)
 
         try:
@@ -251,8 +328,11 @@ class Instrument(PriceableImpl, InstrumentBase):
             asset_class = inst.asset_class
             asset_type = inst.type
 
-            if not all(i.asset_class == asset_class and i.type == asset_type for i in instruments):
-                raise ValueError(f'Instrument(s) not all of type {cls.__name__}')
+            if not all(
+                i.asset_class == asset_class and i.type == asset_type
+                for i in instruments
+            ):
+                raise ValueError(f"Instrument(s) not all of type {cls.__name__}")
         except AttributeError:
             pass
 
@@ -264,7 +344,10 @@ class Instrument(PriceableImpl, InstrumentBase):
 
     @staticmethod
     def compose(components: Iterable):
-        return {c.risk_key.date if isinstance(c, ErrorValue) else c.resolution_key.date: c for c in components}
+        return {
+            c.risk_key.date if isinstance(c, ErrorValue) else c.resolution_key.date: c
+            for c in components
+        }
 
     def flip(self, in_place: bool = True):
         return self.scale(-1, in_place)
@@ -272,8 +355,10 @@ class Instrument(PriceableImpl, InstrumentBase):
     def scale(self, scaling: float, in_place: bool = True, check_resolved=True):
         if scaling is None:
             return self
-        if not hasattr(self, 'scale_in_place'):
-            raise NotImplementedError(f'scale_in_place not implemented on {type(self).__name__}')
+        if not hasattr(self, "scale_in_place"):
+            raise NotImplementedError(
+                f"scale_in_place not implemented on {type(self).__name__}"
+            )
         if in_place:
             self.scale_in_place(scaling, check_resolved=check_resolved)
             return
@@ -303,14 +388,16 @@ class DummyInstrument(Instrument):
 class Security(XRef, Instrument):
     """A security, specified by a well-known identifier"""
 
-    def __init__(self,
-                 ticker: str = None,
-                 bbid: str = None,
-                 ric: str = None,
-                 isin: str = None,
-                 cusip: str = None,
-                 prime_id: str = None,
-                 quantity: float = 1):
+    def __init__(
+        self,
+        ticker: str = None,
+        bbid: str = None,
+        ric: str = None,
+        isin: str = None,
+        cusip: str = None,
+        prime_id: str = None,
+        quantity: float = 1,
+    ):
         """
         Create a security by passing one identifier only and, optionally, a quantity
 
@@ -321,19 +408,36 @@ class Security(XRef, Instrument):
         :param prime_id: Prime (GS internal) identifier
         :param quantity: Quantity (number of contracts for exchange-traded instruments, notional for bonds)
         """
-        if len(tuple(filter(None, (f is not None for f in (ticker, bbid, isin, cusip, prime_id))))) > 1:
-            raise ValueError('Only specify one identifier')
+        if (
+            len(
+                tuple(
+                    filter(
+                        None,
+                        (f is not None for f in (ticker, bbid, isin, cusip, prime_id)),
+                    )
+                )
+            )
+            > 1
+        ):
+            raise ValueError("Only specify one identifier")
 
-        XRef.__init__(self, ticker=ticker, bbid=bbid, ric=ric, isin=isin, cusip=cusip, prime_id=prime_id)
+        XRef.__init__(
+            self,
+            ticker=ticker,
+            bbid=bbid,
+            ric=ric,
+            isin=isin,
+            cusip=cusip,
+            prime_id=prime_id,
+        )
         Instrument.__init__(self)
         self.quantity_ = quantity
 
     @classmethod
     def from_dict(cls, env):
-        return cls(**{
-            k: v for k, v in env.items()
-            if k in inspect.signature(cls).parameters
-        })
+        return cls(
+            **{k: v for k, v in env.items() if k in inspect.signature(cls).parameters}
+        )
 
 
 def encode_instrument(instrument: Optional[Instrument]) -> Optional[dict]:
@@ -341,9 +445,21 @@ def encode_instrument(instrument: Optional[Instrument]) -> Optional[dict]:
         return instrument.to_dict()
 
 
-def encode_instruments(instruments: Optional[Iterable[Instrument]]) -> Optional[Iterable[Optional[dict]]]:
+def encode_instruments(
+    instruments: Optional[Iterable[Instrument]],
+) -> Optional[Iterable[Optional[dict]]]:
     if instruments is not None:
         return [encode_instrument(i) for i in instruments]
+
+
+@lru_cache(maxsize=32)
+def _cached_get_enum_value_asset_class(value):
+    return get_enum_value(AssetClass, value)
+
+
+@lru_cache(maxsize=32)
+def _cached_get_enum_value_asset_type(value):
+    return get_enum_value(AssetType, value)
 
 
 global_config.decoders[Instrument] = Instrument.from_dict
