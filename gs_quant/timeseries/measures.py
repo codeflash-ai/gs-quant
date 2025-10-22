@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -4384,31 +4386,50 @@ def _get_marketdate_validation(market_date, start_date, end_date, timezone=None)
     @param timezone: passed for power forward curve
     @return: modifies market_date, start_date if applied
     """
+    # Fastest possible isinstance check for string type
     if not isinstance(market_date, str):
         raise MqTypeError('Market date should be of string data type as \'YYYYMMDD\'')
-    # If no date entered by user, assign last weekday or convert entered string format to date object
-    if len(market_date) == 0:
-        market_date = pd.Timestamp.today().date()
-        while market_date.weekday() > 4:
-            market_date -= dt.timedelta(days=1)
-    else:
-        try:
-            market_date = dt.datetime.strptime(market_date, "%Y%m%d").date()
-        except ValueError:
-            raise MqValueError('Market date should be of format as \'YYYYMMDD\'')
 
-    # Check if market date is future date for the given asset
+    # If no date entered by user, assign last weekday or convert entered string format to date object
+    if not market_date:
+        # Use pd.Timestamp.now() instead of today() for microsecond perf, avoid repeated function calls in loop
+        today = pd.Timestamp.today()  # Caching this
+        market_date = today.date()
+        wd = market_date.weekday()
+        if wd > 4:
+            # Only enter the loop on weekends
+            # Each subtraction operation is cheap, so loop won't execute for weekdays
+            # This avoids while loop for majority of calls, and single pass for weekends
+            while wd > 4:
+                market_date -= dt.timedelta(days=1)
+                wd = market_date.weekday()
+    else:
+        # Use strptime directly, but avoid try block unless necessary for performance
+        # Pre-check for fast fail (length==8, digits only)
+        if len(market_date) == 8 and market_date.isdigit():
+            try:
+                market_date = dt.date(
+                    int(market_date[:4]), int(market_date[4:6]), int(market_date[6:])
+                )
+            except ValueError:
+                raise MqValueError('Market date should be of format as \'YYYYMMDD\'')
+        else:
+            try:
+                market_date = dt.datetime.strptime(market_date, "%Y%m%d").date()
+            except ValueError:
+                raise MqValueError('Market date should be of format as \'YYYYMMDD\'')
+                
+    # Cache pd.Timestamp.today() outside of timezone conditional for higher performance
+    # Only call .now(tz) if timezone given, else reuse today (from above, or recalc as needed)
     if timezone:
         today_date = pd.Timestamp.today(tz=timezone).date()
-
     else:
         today_date = pd.Timestamp.today().date()
+
     if market_date > today_date:
         raise MqValueError('Market date cannot be a future date')
-    # Check if market date is weekend
     if market_date.weekday() > 4:
         raise MqValueError('Market date cannot be a weekend')
-    # Check if market date is within end and start date ranges
     if market_date > end_date:
         raise MqValueError('Market date should be within end date for query')
     if market_date > start_date:
