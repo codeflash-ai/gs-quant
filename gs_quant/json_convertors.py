@@ -100,7 +100,10 @@ optional_date_config = config(encoder=encode_date_or_str, decoder=decode_optiona
 
 
 def decode_dict_date_key(value):
-    return {dt.date.fromisoformat(d): v for d, v in value.items()} if value is not None else None
+    if value is not None:
+        fromisoformat = dt.date.fromisoformat
+        return {fromisoformat(d): v for d, v in value.items()}
+    return None
 
 
 def decode_dict_date_key_or_float(value):
