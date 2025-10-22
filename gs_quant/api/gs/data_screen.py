@@ -18,6 +18,8 @@ from typing import Tuple, Dict
 from gs_quant.session import GsSession
 from gs_quant.target.data_screen import AnalyticsScreen, FilterRequest, DataRow
 
+_REQUEST_HEADERS = {'Content-Type': 'application/json;charset=utf-8'}
+
 _logger = logging.getLogger(__name__)
 
 
@@ -79,8 +81,14 @@ class GsDataScreenApi:
 
         :return: AnalyticsScreen, the new screen object containing a new id
         """
-        request_headers = {'Content-Type': 'application/json;charset=utf-8'}
-        return GsSession.current._post('/data/screens', screen, request_headers=request_headers, cls=AnalyticsScreen)
+        # Avoid rebuilding the dict on every call (static object, safe here)
+        request_headers = _REQUEST_HEADERS
+        return GsSession.current._post(
+            '/data/screens', 
+            screen, 
+            request_headers=request_headers, 
+            cls=AnalyticsScreen
+        )
 
     @classmethod
     def filter_screen(cls, screen_id: str, filter_request: FilterRequest) -> Tuple[DataRow, ...]:
