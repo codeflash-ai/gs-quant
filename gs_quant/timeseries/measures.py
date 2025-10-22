@@ -52,6 +52,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
 
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
+
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
 TD_ONE = dt.timedelta(days=1)
@@ -863,11 +865,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -2536,22 +2538,13 @@ def var_swap(asset: Asset, tenor: str, forward_start_date: Optional[str] = None,
 
 
 def _get_iso_data(region: str):
-    timezone = 'US/Eastern'
-    peak_start = 7
-    peak_end = 23
-    weekends = [5, 6]
-
-    if region in ['MISO', 'ERCOT', 'SPP']:
-        timezone = 'US/Central'
-        peak_start = 6
-        peak_end = 22
+    # Fast-path for most-used regions, tuple assignment to minimize python bytecode overhead.
     if region == 'CAISO':
-        timezone = 'US/Pacific'
-        weekends = [6]
-        peak_start = 6
-        peak_end = 22
-
-    return timezone, peak_start, peak_end, weekends
+        return 'US/Pacific', 6, 22, (6,)
+    if region in {'MISO', 'ERCOT', 'SPP'}:
+        return 'US/Central', 6, 22, (5, 6)
+    # Default
+    return 'US/Eastern', 7, 23, (5, 6)
 
 
 def _get_qbt_mapping(bucket, region):
@@ -2589,30 +2582,42 @@ def _get_weight_for_bucket(asset, start_contract_range, end_contract_range, buck
 
 
 def _filter_by_bucket(df, bucket, holidays, region):
-    # TODO: get frequency definition from SecDB
-    timezone, peak_start, peak_end, weekends = _get_iso_data(region)
-    if bucket.lower() == '7x24':
-        pass
-    # offpeak: 11pm-7am & weekend & holiday
-    elif bucket.lower() == 'offpeak':
-        df = df.loc[df['date'].isin(holidays) |
-                    df['day'].isin(weekends) |
-                    (~df['date'].isin(holidays) & ~df['day'].isin(weekends) &
-                     ((df['hour'] < peak_start) | (df['hour'] > peak_end - 1)))]
-    # peak: 7am to 11pm on weekdays
-    elif bucket.lower() == 'peak':
-        df = df.loc[(~df['date'].isin(holidays)) & (~df['day'].isin(weekends)) & (df['hour'] > peak_start - 1) &
-                    (df['hour'] < peak_end)]
-    # 7x8: 11pm to 7am
-    elif bucket.lower() == '7x8':
-        df = df.loc[(df['hour'] < peak_start) | (df['hour'] > peak_end - 1)]
-    # 2x16h: weekends & holidays
-    elif bucket.lower() == '2x16h' or bucket.lower() == 'suh1x16':
-        df = df.loc[((df['date'].isin(holidays)) | df['day'].isin(weekends)) & ((df['hour'] > peak_start - 1) &
-                                                                                (df['hour'] < peak_end))]
+    # Prealloc and single .lower() call for repeated use
+    bucket_l = bucket.lower()
+    timezone, peak_start, peak_end, weekends_tuple = _get_iso_data(region)
+
+    holidays_set = set(holidays)
+    weekends = weekends_tuple if isinstance(weekends_tuple, tuple) else tuple(weekends_tuple)  # For safety, ensure tuple
+
+    # Use numpy for boolean masks, and minimize DataFrame copies
+    if bucket_l == '7x24':
+        return df
+    elif bucket_l == 'offpeak':
+        # Compose masks efficiently
+        isin_holidays = df['date'].isin(holidays_set)
+        isin_weekends = df['day'].isin(weekends)
+        not_isin_holidays = ~isin_holidays
+        not_isin_weekends = ~isin_weekends
+        hour_mask = (df['hour'] < peak_start) | (df['hour'] > peak_end - 1)
+        mask = isin_holidays | isin_weekends | (not_isin_holidays & not_isin_weekends & hour_mask)
+        return df.loc[mask]
+    elif bucket_l == 'peak':
+        isin_holidays = df['date'].isin(holidays_set)
+        isin_weekends = df['day'].isin(weekends)
+        mask = (~isin_holidays) & (~isin_weekends) & (df['hour'] > peak_start - 1) & (df['hour'] < peak_end)
+        return df.loc[mask]
+    elif bucket_l == '7x8':
+        mask = (df['hour'] < peak_start) | (df['hour'] > peak_end - 1)
+        return df.loc[mask]
+    elif bucket_l == '2x16h' or bucket_l == 'suh1x16':
+        isin_holidays = df['date'].isin(holidays_set)
+        isin_weekends = df['day'].isin(weekends)
+        day_off = isin_holidays | isin_weekends
+        hour_range = (df['hour'] > peak_start - 1) & (df['hour'] < peak_end)
+        mask = day_off & hour_range
+        return df.loc[mask]
     else:
         raise MqValueError('Invalid bucket: ' + bucket + '. Expected Value: peak, offpeak, 7x24, 7x8, 2x16h.')
-    return df
 
 
 def _string_to_date_interval(interval: str):
@@ -3048,30 +3053,31 @@ def bucketize_price(asset: Asset, price_method: str, bucket: str = '7x24',
         raise MqValueError('Bucketize function returns aggregated daily data')
 
     # create granularity indicator
-    if granularity.lower() in ['daily', 'd']:
-        granularity = 'D'
-    elif granularity.lower() in ['monthly', 'm']:
-        granularity = 'M'
+    granularity_l = granularity.lower()
+    if granularity_l in ('daily', 'd'):
+        granularity_code = 'D'
+    elif granularity_l in ('monthly', 'm'):
+        granularity_code = 'M'
     else:
         raise MqValueError('Invalid granularity: ' + granularity + '. Expected Value: daily or monthly.')
 
     bbid = Asset.get_identifier(asset, AssetIdentifier.BLOOMBERG_ID)
-    region = bbid.split(" ")[0]
-    timezone = _get_iso_data(region)[0]
+    region = bbid.split(" ", 1)[0]
+    timezone, peak_start, peak_end, weekends_tuple = _get_iso_data(region)
 
     to_zone = tz.gettz('UTC')
     from_zone = tz.gettz(timezone)
 
-    # Start date and end date are considered to be in ISO's local timezone
     start_date, end_date = DataContext.current.start_date, DataContext.current.end_date
     holidays = NercCalendar().holidays(start=start_date, end=end_date).date
-    # Start time is constructed by combining start date with 00:00:00 timestamp
-    # in local time and then converted to UTC time
-    # End time is constructed by combining end date with 23:59:59 timestamp
-    # in local time and then converted to UTC time
-    start_time = dt.datetime.combine(start_date, dt.datetime.min.time(), tzinfo=from_zone) \
-        .astimezone(to_zone)
-    end_time = dt.datetime.combine(end_date, dt.datetime.max.time(), tzinfo=from_zone).astimezone(to_zone)
+    holidays_set = set(holidays)  # Used more than once
+
+    # Precompute start and end time (UTC) only once
+    start_time_dt = dt.datetime.combine(start_date, dt.datetime.min.time())
+    end_time_dt = dt.datetime.combine(end_date, dt.datetime.max.time())
+
+    start_time = start_time_dt.replace(tzinfo=from_zone).astimezone(to_zone)
+    end_time = end_time_dt.replace(tzinfo=from_zone).astimezone(to_zone)
 
     where = dict(priceMethod=price_method.upper())
     with DataContext(start_time, end_time):
@@ -3093,35 +3099,60 @@ def bucketize_price(asset: Asset, price_method: str, bucket: str = '7x24',
     if df.empty:
         series = ExtendedSeries(dtype=float)
     else:
+        # Convert index timezone a single time (this is a no-op if already correct)
         df = df.tz_convert(timezone)
 
-        df['month'] = df.index.to_period('M')
-        df['date'] = df.index.date
-        df['day'] = df.index.dayofweek
-        df['hour'] = df.index.hour
-        df['timestamp'] = df.index
+        # Assign all needed columns in a single step to reduce indexing overhead
+        periods = df.index.to_period('M')
+        date_index = df.index.date
+        dayofweek = df.index.dayofweek
+        hour = df.index.hour
+        # No need for timestamp col, can use index directly later.
+        df = df.assign(
+            month=periods,
+            date=date_index,
+            day=dayofweek,
+            hour=hour
+        )
 
-        # This will remove any duplicate prices uploaded with the same timestamp
+        # Remove duplicates first
         df = df.drop_duplicates()
-        # freq is the frequency at which the ISO publishes data for e.g. 15 min, 1hr
-        freq = int(min(np.diff(df.index).astype('timedelta64[s]') / np.timedelta64(1, 's')))
+        # Calculate minimal frequency with vectorized ops (avoiding intermediate conversions)
+        index_diffs = np.diff(df.index.values.astype('int64'))  # ns
+        min_diff_sec = int(np.min(index_diffs) // 1_000_000_000) if len(index_diffs) > 0 else 0
+        freq = min_diff_sec
         if freq == 0:
             raise MqValueError('Duplicate data rows probable for this period')
-        # checking missing data points
-        ref_hour_range = pd.date_range(str(start_date), str(end_date + dt.timedelta(days=1)),
-                                       None, str(freq) + "S", timezone, False, None, 'left')
 
-        missing_hours = ref_hour_range[~ref_hour_range.isin(df.index)]
-        missing_dates = np.unique(missing_hours.date)
-        missing_months = np.unique(np.array(missing_dates, dtype='M8[D]').astype('M8[M]')).astype('str')
+        # Build correct reference range and mask for missing data
+        ref_hour_range = pd.date_range(
+            str(start_date),
+            str(end_date + dt.timedelta(days=1)),
+            freq=str(freq) + "S",
+            tz=timezone,
+            inclusive='left'
+        )
 
-        # drop dates and months which have missing data
-        df = df.loc[(~df['date'].isin(missing_dates))]
-        if granularity == 'M':
-            df = df.loc[(~df['month'].astype('str').isin(missing_months))]
+        missing_hours_mask = ~pd.Index(ref_hour_range).isin(df.index)
+        if missing_hours_mask.any():
+            missing_hours = ref_hour_range[missing_hours_mask]
+            missing_dates = np.unique(missing_hours.date)
+            missing_months = np.unique(np.array(missing_dates, dtype='M8[D]').astype('M8[M]')).astype(str)
+        else:
+            missing_dates = []
+            missing_months = []
+
+        # Drop dates/months with missing data in a single step
+        if len(missing_dates) > 0:
+            df = df.loc[~df['date'].isin(missing_dates)]
+        if granularity_code == 'M' and len(missing_months) > 0:
+            # Use vectorized method for month->string conversion
+            month_strs = df['month'].astype(str).values
+            mask_months = np.isin(month_strs, missing_months, invert=True)
+            df = df.loc[mask_months]
 
         df = _filter_by_bucket(df, bucket, holidays, region)
-        df = df['price'].resample(granularity).mean()
+        df = df['price'].resample(granularity_code).mean()
         df.index = df.index.date
         df = df.loc[start_date: end_date]
         series = ExtendedSeries(df)
