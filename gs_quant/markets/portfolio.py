@@ -18,7 +18,7 @@ import logging
 import re
 from dataclasses import dataclass
 from itertools import chain
-from typing import Iterable, Optional, Tuple, Union
+from typing import List, Iterable, Optional, Tuple, Union
 from urllib.parse import quote
 
 import deprecation
@@ -479,19 +479,45 @@ class Portfolio(PriceableImpl):
         if not isinstance(key, (str, Instrument, Portfolio)):
             raise ValueError('key must be a name or Instrument or Portfolio')
 
+        # Create a local reference to __priceables for minor speedup in tight loops
+        priceables = self.__priceables
+
         if isinstance(key, str):
             idx = self.__priceables_by_name.get(key)
         else:
-            idx = []
-            for p_idx, p in enumerate(self.__priceables):
-                if p == key or getattr(p, "unresolved", None) == key:
-                    idx.append(p_idx)
+            # Only create idx as a list if we know it's usable
+            idx = [p_idx for p_idx, p in enumerate(priceables)
+                   if p == key or getattr(p, "unresolved", None) == key]
 
-        paths = tuple(PortfolioPath(i) for i in idx) if idx else ()
+        # Pre-allocate the tuple size in one go for better memory usage
+        paths: Tuple[PortfolioPath, ...]
+        if idx:
+            if isinstance(idx, list):
+                # key is not str, idx is a list
+                paths = tuple(PortfolioPath(i) for i in idx)
+            else:
+                # key is str, idx might be an int or list
+                if isinstance(idx, int):
+                    paths = (PortfolioPath(idx),)
+                elif isinstance(idx, list):
+                    paths = tuple(PortfolioPath(i) for i in idx)
+                else:
+                    paths = ()
+        else:
+            paths = ()
 
-        for path, porfolio in ((PortfolioPath(i), p)
-                               for i, p in enumerate(self.__priceables) if isinstance(p, Portfolio)):
-            paths += tuple(path + sub_path for sub_path in porfolio.paths(key))
+        # Only do the recursive lookup if there are portfolios present
+        subpaths: List[PortfolioPath] = []
+        for i, p in enumerate(priceables):
+            if isinstance(p, Portfolio):
+                subp_paths = p.paths(key)
+                if subp_paths:
+                    prefix = PortfolioPath(i)
+                    # Instead of using generator expressions and immutable tuples in a loop, extend a list and then convert once
+                    subpaths.extend(prefix + sub_path for sub_path in subp_paths)
+        # Use tuple concatenation once
+        if subpaths:
+            paths = paths + tuple(subpaths)
 
         return paths
 
