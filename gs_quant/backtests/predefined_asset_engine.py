@@ -120,12 +120,13 @@ class PredefinedAssetEngine(BacktestBaseEngine):
         self.data_handler = DataHandler(data_mgr, tz=tz)
         self.valuation_method = valuation_method
         self.execution_engine = None
+        self._eod_default_valuation_time = dt.time(23)
 
     def _eod_valuation_time(self):
         if self.valuation_method.window:
             return self.valuation_method.window.end
         else:
-            return dt.time(23)
+            return self._eod_default_valuation_time
 
     def _timer(self, strategy, start, end, frequency, states=None):
         dates = list(map(lambda x: x.date(), pd.to_datetime(pd.bdate_range(start=start, end=end, freq=frequency)))) \
