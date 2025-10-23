@@ -634,6 +634,9 @@ class PositionContext(ContextBaseWithDefault):
         return PositionContext()
 
     def clone(self, **kwargs):
-        clone_kwargs = {k: getattr(self, k, None) for k in signature(self.__init__).parameters.keys()}
+        cls = type(self)
+        if not hasattr(cls, '_init_param_names'):
+            cls._init_param_names = tuple(signature(self.__init__).parameters.keys())
+        clone_kwargs = {k: getattr(self, k, None) for k in cls._init_param_names}
         clone_kwargs.update(kwargs)
         return self.__class__(**clone_kwargs)
