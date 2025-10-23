@@ -17,7 +17,7 @@ import datetime as dt
 import logging
 import traceback
 from time import sleep
-from typing import List, Union, Dict
+from typing import Dict, List, Union
 
 import deprecation
 import numpy as np
@@ -26,18 +26,21 @@ import pandas as pd
 from gs_quant.api.gs.portfolios import GsPortfolioApi
 from gs_quant.api.gs.reports import GsReportApi
 from gs_quant.common import Currency, PositionType
-from gs_quant.entities.entitlements import Entitlements, EntitlementBlock, User
-from gs_quant.entities.entity import PositionedEntity, EntityType, ScenarioCalculationMeasure
-from gs_quant.errors import MqError
-from gs_quant.errors import MqValueError
+from gs_quant.entities.entitlements import EntitlementBlock, Entitlements, User
+from gs_quant.entities.entity import (EntityType, PositionedEntity,
+                                      ScenarioCalculationMeasure)
+from gs_quant.errors import MqError, MqValueError
 from gs_quant.markets.factor import Factor
-from gs_quant.markets.portfolio_manager_utils import build_exposure_df, build_portfolio_constituents_df, \
-    build_sensitivity_df, get_batched_dates
+from gs_quant.markets.portfolio_manager_utils import (
+    build_exposure_df, build_portfolio_constituents_df, build_sensitivity_df,
+    get_batched_dates)
 from gs_quant.markets.report import PerformanceReport, ReportJobFuture
 from gs_quant.markets.scenario import FactorScenario
-from gs_quant.models.risk_model import MacroRiskModel, ReturnFormat, FactorType, FactorRiskModel
-from gs_quant.target.portfolios import RiskAumSource, PortfolioTree
-from gs_quant.target.risk_models import RiskModelDataAssetsRequest, RiskModelUniverseIdentifierRequest
+from gs_quant.models.risk_model import (FactorRiskModel, FactorType,
+                                        MacroRiskModel, ReturnFormat)
+from gs_quant.target.portfolios import PortfolioTree, RiskAumSource
+from gs_quant.target.risk_models import (RiskModelDataAssetsRequest,
+                                         RiskModelUniverseIdentifierRequest)
 
 _logger = logging.getLogger(__name__)
 
@@ -107,21 +110,29 @@ class PortfolioManager(PositionedEntity):
 
         :return: returns the PerformanceReport associated with portfolio if one exists
         """
-        reports = GsReportApi.get_reports(limit=100,
-                                          position_source_type='Portfolio',
-                                          position_source_id=self.id,
-                                          report_type='Portfolio Performance Analytics',
-                                          tags=tags,
-                                          scroll='1m')
+        # Localize self.id for repeated use (avoids repeated attribute lookup)
+        portfolio_id = self.id
 
-        # If tags is set to None, it returns all PPA reports for the portfolio,
-        # and returning reports[0] can return any one PPA, so specifically if tags is None it means we are
-        # looking for the root PPA, we need to explicitly filter out and get the one report where tags is None
+        reports = GsReportApi.get_reports(
+            limit=100,
+            position_source_type='Portfolio',
+            position_source_id=portfolio_id,
+            report_type='Portfolio Performance Analytics',
+            tags=tags,
+            scroll='1m'
+        )
+
+        # Only filter if tags is None, don't iterate unnecessarily
         if tags is None:
-            reports = [report for report in reports if report.parameters.tags is None]
-        if len(reports) == 0:
-            raise MqError('No performance report found.')
-        return PerformanceReport.from_target(reports[0])
+            # Use generator for memory efficiency, only collect first match
+            report = next((report for report in reports if report.parameters.tags is None), None)
+            if report is None:
+                raise MqError('No performance report found.')
+            return PerformanceReport.from_target(report)
+        else:
+            if not reports:
+                raise MqError('No performance report found.')
+            return PerformanceReport.from_target(reports[0])
 
     def schedule_reports(self,
                          start_date: dt.date = None,
