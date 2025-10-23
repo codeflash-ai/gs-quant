@@ -417,37 +417,55 @@ class Portfolio(PriceableImpl):
 
     def to_frame(self, mappings: Optional[dict] = None) -> pd.DataFrame:
         def to_records(portfolio: Portfolio) -> list:
+            # Use iterative stack instead of recursion for better performance on large portfolios
+            stack = [portfolio]
             records = []
-
-            for priceable in portfolio.priceables:
-                if isinstance(priceable, Portfolio):
-                    records.extend(to_records(priceable))
-                else:
-                    as_dict = priceable.as_dict()
-                    if not hasattr(priceable, 'asset_class'):
-                        as_dict['$type'] = priceable.type_
-
-                    records.append(dict(chain(as_dict.items(),
-                                              (('instrument', priceable), ('portfolio', portfolio.name)))))
-
+            while stack:
+                current = stack.pop()
+                for priceable in current.priceables:
+                    if isinstance(priceable, Portfolio):
+                        stack.append(priceable)
+                    else:
+                        as_dict = priceable.as_dict()
+                        if not hasattr(priceable, 'asset_class'):
+                            as_dict['$type'] = priceable.type_
+                        # Use update instead of dict(chain(...)) to avoid constructing intermediate iterators
+                        record = dict(as_dict)
+                        record['instrument'] = priceable
+                        record['portfolio'] = current.name
+                        records.append(record)
             return records
 
-        df = pd.DataFrame.from_records(to_records(self)).set_index(['portfolio', 'instrument'])
-        all_columns = df.columns.to_list()
-        columns = sorted(c for c in all_columns if c not in ('asset_class', 'type', '$type'))
+        # Generate records and create DataFrame
+        records = to_records(self)
+        df = pd.DataFrame.from_records(records)
+        # Set index directly before further processing
+        df.set_index(['portfolio', 'instrument'], inplace=True)
 
+        all_columns = df.columns.tolist()
+        # Avoid repeated lookups by making a set of columns to exclude
+        exclude_columns = {'asset_class', 'type', '$type'}
+        columns = sorted([c for c in all_columns if c not in exclude_columns])
+        # Precompute presence for later fast lookup
+        all_columns_set = set(all_columns)
+
+        # Optimize column ordering
         for asset_column in ('$type', 'type', 'asset_class'):
-            if asset_column in all_columns:
+            if asset_column in all_columns_set:
                 columns = [asset_column] + columns
 
-        df = df[columns]
-        mappings = mappings or {}
+        # Only reindex columns if it's necessary (if column order is different)
+        if columns != df.columns.tolist():
+            df = df[columns]
 
+        mappings = mappings or {}
+        # Fast path for string/column mappings
         for key, value in mappings.items():
             if isinstance(value, str):
+                # Assign directly for performance
                 df[key] = df[value]
             elif callable(value):
-                df[key] = len(df) * [None]
+                # Avoid creating unnecessary lists, use apply directly, and avoid pre-assigning None
                 df[key] = df.apply(value, axis=1)
 
         return df
