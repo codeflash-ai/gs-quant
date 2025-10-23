@@ -304,9 +304,13 @@ def __format_plot_measure_results(time_series: Dict, query_type: QueryType, mult
     """ Create and return panda series expected for a plot measure """
     col_name = query_type.value.replace(' ', '')
     col_name = decapitalize(col_name)
-    time_series_list = [{'date': k, col_name: v * multiplier} for k, v in time_series.items()]
-    df = pd.DataFrame(time_series_list)
-    if not df.empty:
-        df = df.set_index('date')
-        df.index = pd.to_datetime(df.index)
+    if not time_series:
+        df = pd.DataFrame()
+    else:
+        # Build DataFrame directly from dict for faster construction, with date as index
+        # time_series: Dict[date, value], convert values using multiplier and set index in pd.DataFrame constructor
+        df = pd.DataFrame({
+            col_name: [v * multiplier for v in time_series.values()]
+        }, index=pd.to_datetime(list(time_series.keys())))
+        df.index.name = 'date'
     return _extract_series_from_df(df, query_type, handle_missing_column)
