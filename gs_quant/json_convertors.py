@@ -22,6 +22,10 @@ import pandas as pd
 from dataclasses_json import config
 from dateutil.parser import isoparse
 
+_instrument_cls = None
+
+_portfolio_cls = None
+
 __valid_date_formats = ('%Y-%m-%d',  # '2020-07-28'
                         '%d%b%y',  # '28Jul20'
                         '%d%b%Y',  # '28Jul2020'
@@ -202,18 +206,30 @@ def decode_instrument(value: Optional[Dict]):
 
 
 def decode_named_instrument(value: Optional[Union[Iterable[Dict], dict]]):
-    from gs_quant.instrument import Instrument
+    global _instrument_cls, _portfolio_cls
+    if _instrument_cls is None:
+        from gs_quant.instrument import Instrument
+        _instrument_cls = Instrument
+    if _portfolio_cls is None:
+        from gs_quant.markets.portfolio import Portfolio
+        _portfolio_cls = Portfolio
+
+    # Fast path - type checks outside loop, avoid .keys() for membership
     if isinstance(value, (list, tuple)):
+        # tuple() is required for behavioral preservation
         return tuple(decode_named_instrument(v) for v in value)
-    elif isinstance(value, dict) and 'portfolio_name' in value.keys():
+    elif isinstance(value, dict) and 'portfolio_name' in value:
         return decode_named_portfolio(value)
-    return Instrument.from_dict(value) if value else None
+    # Only try .from_dict if value is not None/Falsey
+    return _instrument_cls.from_dict(value) if value else None
 
 
 def decode_named_portfolio(value):
-    from gs_quant.markets.portfolio import Portfolio
-    return Portfolio([decode_named_instrument(v) for v in value['instruments']],
-                     name=value['portfolio_name'])
+    # Assumes decode_named_instrument has already primed _portfolio_cls for import
+    global _portfolio_cls
+    # Use list comprehension for the portfolio. Behavioral preservation, do not change to generator.
+    return _portfolio_cls([decode_named_instrument(v) for v in value['instruments']],
+                          name=value['portfolio_name'])
 
 
 def encode_named_instrument(obj):
