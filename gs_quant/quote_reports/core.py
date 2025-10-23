@@ -13,24 +13,41 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 """
+
 from typing import Dict, Any, Iterable, Union
 
 from dataclasses_json.cfg import _GlobalConfig
 
 from gs_quant.base import CustomComments
-from gs_quant.workflow import VisualStructuringReport, BinaryImageComments, HyperLinkImageComments, \
-    CustomDeltaHedge, DeltaHedge, HedgeTypes
+from gs_quant.workflow import (
+    VisualStructuringReport,
+    BinaryImageComments,
+    HyperLinkImageComments,
+    CustomDeltaHedge,
+    DeltaHedge,
+    HedgeTypes,
+)
 
 global_config = _GlobalConfig()
 
 
-def quote_report_from_dict(quote_report_dict: Union[Dict[str, Any], VisualStructuringReport]):
+def quote_report_from_dict(
+    quote_report_dict: Union[Dict[str, Any], VisualStructuringReport],
+):
     if quote_report_dict is not None:
         if isinstance(quote_report_dict, VisualStructuringReport):
             return quote_report_dict
-        type = quote_report_dict.get('reportType')
-        if 'VisualStructuringReport' == type:
+        if quote_report_dict.get("reportType") == "VisualStructuringReport":
+            cache = getattr(quote_report_from_dict, "__cache", None)
+            if cache is None:
+                cache = {}
+                setattr(quote_report_from_dict, "__cache", cache)
+            dict_id = id(quote_report_dict)
+            cached_report = cache.get(dict_id)
+            if cached_report is not None:
+                return cached_report
             report = VisualStructuringReport.from_dict(quote_report_dict)
+            cache[dict_id] = report
             return report
     return None
 
@@ -49,11 +66,11 @@ def custom_comment_from_dict(in_dict: Union[Dict[str, Any], CustomComments]):
     if in_dict is not None:
         if isinstance(in_dict, CustomComments):
             return in_dict
-        type = in_dict.get('commentType')
-        if 'binaryImageComments' == type:
+        type = in_dict.get("commentType")
+        if "binaryImageComments" == type:
             out = BinaryImageComments.from_dict(in_dict)
             return out
-        if 'hyperLinkImageComments' == type:
+        if "hyperLinkImageComments" == type:
             out = HyperLinkImageComments.from_dict(in_dict)
             return out
     return None
@@ -73,11 +90,11 @@ def hedge_type_from_dict(hedge_type_dict: Union[Dict[str, Any], HedgeTypes]):
     if hedge_type_dict is not None:
         if isinstance(hedge_type_dict, HedgeTypes):
             return hedge_type_dict
-        type = hedge_type_dict.get('type')
-        if 'CustomDeltaHedge' == type:
+        type = hedge_type_dict.get("type")
+        if "CustomDeltaHedge" == type:
             hedge_type = CustomDeltaHedge.from_dict(hedge_type_dict)
             return hedge_type
-        if 'DeltaHedge' == type:
+        if "DeltaHedge" == type:
             hedge_type = DeltaHedge.from_dict(hedge_type_dict)
             return hedge_type
     return None
