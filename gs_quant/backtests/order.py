@@ -49,10 +49,17 @@ class OrderBase(metaclass=ABCMeta):
 
     def execution_price(self, data_handler: DataHandler) -> float:
         price = self._execution_price(data_handler)
-        if np.isnan(price):
-            raise RuntimeError('can not compute the execution price')
-        else:
-            return price
+        # `np.isnan` is slow on scalars due to dispatching through python call.
+        # Python's float has a fast isnan in math
+        # The input can be a Python float or (rarely) numpy float, but fastpath for float
+        try:
+            if price != price:  # fast NaN check
+                raise RuntimeError('can not compute the execution price')
+        except TypeError:
+            # fallback if price is not a float or doesn't support __ne__ (very rare)
+            if np.isnan(price):
+                raise RuntimeError('can not compute the execution price')
+        return price
 
     def execution_quantity(self) -> float:
         raise RuntimeError('The method execution_price is not implemented on OrderBase')
