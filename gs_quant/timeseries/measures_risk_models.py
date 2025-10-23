@@ -139,8 +139,10 @@ def risk_model_measure(asset: Asset, risk_model_id: str,
     measures = {}
     for result in query_results:
         if result:
-            measure_name = set(result.get('assetData', {}).keys()).difference({'universe'})
-            exposures = result.get('assetData', {}).get(measure_name.pop(), [])
+            asset_data = result.get('assetData', {})
+            # Fast key selection, avoiding set operations
+            measure_key = next((k for k in asset_data.keys() if k != 'universe'), None)
+            exposures = asset_data.get(measure_key, []) if measure_key else []
             if exposures:
                 measures[result['date']] = exposures[0]
 
@@ -304,9 +306,16 @@ def __format_plot_measure_results(time_series: Dict, query_type: QueryType, mult
     """ Create and return panda series expected for a plot measure """
     col_name = query_type.value.replace(' ', '')
     col_name = decapitalize(col_name)
-    time_series_list = [{'date': k, col_name: v * multiplier} for k, v in time_series.items()]
-    df = pd.DataFrame(time_series_list)
-    if not df.empty:
-        df = df.set_index('date')
-        df.index = pd.to_datetime(df.index)
+    # Use dict -> DataFrame for improved efficiency,
+    # directly setting index/columns; avoids intermediate list
+    if not time_series:
+        df = pd.DataFrame(columns=[col_name], dtype=float)
+    else:
+        # Create index from date keys for fast batch assignment
+        data = {k: v * multiplier for k, v in time_series.items()}
+        df = pd.DataFrame.from_dict(data, orient='index', columns=[col_name])
+        df.index.name = 'date'
+        if not isinstance(df.index, pd.DatetimeIndex):
+            # Only convert if necessary
+            df.index = pd.to_datetime(df.index)
     return _extract_series_from_df(df, query_type, handle_missing_column)
