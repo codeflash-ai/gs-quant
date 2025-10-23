@@ -61,8 +61,10 @@ class Portfolio(PriceableImpl):
         super().__init__()
         if isinstance(priceables, dict):
             priceables_list = []
-            for name, priceable in priceables.items():
-                priceable.name = name
+            # Optimize dict iteration for speed (local variable assignment)
+            priceables_items = priceables.items()
+            for name_key, priceable in priceables_items:
+                priceable.name = name_key
                 priceables_list.append(priceable)
             self.priceables = priceables_list
         else:
@@ -218,12 +220,29 @@ class Portfolio(PriceableImpl):
         return tuple(unique_everseen(portfolios))
 
     def subset(self, paths: Iterable[PortfolioPath], name=None):
-        # Do our paths represent a single portfolio?
+        """
+        Returns the subset Portfolio or single portfolio if paths specify one portfolio.
+        This is made faster by avoiding unnecessary tuple conversions and repeated lookups.
+        """
+        # Materialize paths (paths can be used multiple times below, so this is needed)
         paths_tuple = tuple(paths)
-        if len(paths_tuple) == 1 and isinstance(self[paths_tuple[0]], Portfolio):
-            return self[paths_tuple[0]]
-        else:
-            return Portfolio(tuple(self[p] for p in paths_tuple), name=name)
+        len_paths = len(paths_tuple)
+
+        # Fast-path: avoid indexing/iteration if no paths
+        if len_paths == 0:
+            return Portfolio((), name=name)
+
+        # Single portfolio path, try a single self[paths_tuple[0]] access only once.
+        first_path = paths_tuple[0]
+        first_path_value = self[first_path]
+
+        # Only if there's exactly one path and it produces a Portfolio, return it directly.
+        if len_paths == 1 and isinstance(first_path_value, Portfolio):
+            return first_path_value
+
+        # Otherwise, build subset tuple efficiently, using a generator to avoid intermediate lists
+        getitem = self.__getitem__  # Localize for perf (minor, but idiomatic in performance code)
+        return Portfolio(tuple(getitem(p) for p in paths_tuple), name=name)
 
     @staticmethod
     def __from_internal_positions(id_type: str, positions_id, activity_type: str):
