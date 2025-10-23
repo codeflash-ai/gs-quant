@@ -45,22 +45,54 @@ class AddTradeActionImpl(ActionHandler):
         super().__init__(action)
 
     def generate_orders(self, state: dt.datetime, backtest: PredefinedAssetBacktest, info: AddTradeActionInfo):
+        # Cache frequently accessed attributes to avoid repeated lookups
+        action = self._action
+        priceables = action.priceables
+        trade_duration = action.trade_duration
+        action_name = action.name
 
-        orders = []
-        for pricable in self.action.priceables:
-            quantity = pricable.instrument_quantity * 1 if info is None or info.scaling is None else info.scaling
-            orders.append(OrderAtMarket(instrument=pricable,
-                                        quantity=quantity,
-                                        generation_time=state,
-                                        execution_datetime=state,
-                                        source=self.action.name))
-            if isinstance(self.action.trade_duration, dt.timedelta):
-                # create close order
-                orders.append(OrderAtMarket(instrument=pricable,
-                                            quantity=quantity * -1,
-                                            generation_time=state,
-                                            execution_datetime=state + self.action.trade_duration,
-                                            source=self.action.name))
+        # Precompute quantity for each pricable with local variables
+        is_timedelta = isinstance(trade_duration, dt.timedelta)
+        orders_append = orders = []
+
+        # Use local variable for append
+        orders_append = orders.append
+
+        # Minimize dot-lookup; minimize repeated `isinstance` check in loop
+        # Avoid repeated attribute access for 'trade_duration'/'name'/etc in tight loop
+        if info is not None and info.scaling is not None:
+            # common case optimization: scaling supplied, avoid conditional
+            scaling = info.scaling
+            for pricable in priceables:
+                quantity = scaling
+                orders_append(OrderAtMarket(instrument=pricable,
+                                           quantity=quantity,
+                                           generation_time=state,
+                                           execution_datetime=state,
+                                           source=action_name))
+                if is_timedelta:
+                    orders_append(OrderAtMarket(instrument=pricable,
+                                               quantity=-quantity,
+                                               generation_time=state,
+                                               execution_datetime=state + trade_duration,
+                                               source=action_name))
+        else:
+            # info is None or scaling is None, fallback behavior
+            for pricable in priceables:
+                # instrument_quantity is multiplied by 1 for type compatibility
+                quantity = pricable.instrument_quantity * 1
+                orders_append(OrderAtMarket(instrument=pricable,
+                                           quantity=quantity,
+                                           generation_time=state,
+                                           execution_datetime=state,
+                                           source=action_name))
+                if is_timedelta:
+                    orders_append(OrderAtMarket(instrument=pricable,
+                                               quantity=-quantity,
+                                               generation_time=state,
+                                               execution_datetime=state + trade_duration,
+                                               source=action_name))
+
         return orders
 
     def apply_action(self, state: dt.datetime, backtest: PredefinedAssetBacktest, info=None):
