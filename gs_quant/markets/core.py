@@ -631,7 +631,7 @@ class PositionContext(ContextBaseWithDefault):
 
     @classmethod
     def default_value(cls) -> object:
-        return PositionContext()
+        return PositionContext(dt.date.today())
 
     def clone(self, **kwargs):
         clone_kwargs = {k: getattr(self, k, None) for k in signature(self.__init__).parameters.keys()}
