@@ -217,6 +217,9 @@ class RelativeDateSchedule:
         else:
             self.base_date = dt.date.today()
         self.end_date = end_date
+        # Cache string representations for performance
+        self._base_date_str = str(self.base_date) if self.base_date_passed_in else None
+        self._end_date_str = str(self.end_date)
 
     def apply_rule(self,
                    currencies: List[Union[Currency, str]] = None,
@@ -253,6 +256,6 @@ class RelativeDateSchedule:
     def as_dict(self):
         rdate_dict = {'rule': self.rule}
         if self.base_date_passed_in:
-            rdate_dict['baseDate'] = str(self.base_date)
-        rdate_dict['endDate'] = str(self.end_date)
+            rdate_dict['baseDate'] = self._base_date_str
+        rdate_dict['endDate'] = self._end_date_str
         return rdate_dict
