@@ -71,6 +71,7 @@ class RelativeDate:
             self.base_date = dt.date.today()
         self.base_date = self.base_date.date() if isinstance(
             self.base_date, (dt.datetime, pd.Timestamp)) else self.base_date
+        self._base_date_str = str(self.base_date)
 
     def apply_rule(self,
                    currencies: List[Union[Currency, str]] = None,
@@ -175,7 +176,7 @@ class RelativeDate:
     def as_dict(self):
         rdate_dict = {'rule': self.rule}
         if self.base_date_passed_in:
-            rdate_dict['baseDate'] = str(self.base_date)
+            rdate_dict['baseDate'] = self._base_date_str
         return rdate_dict
 
 
