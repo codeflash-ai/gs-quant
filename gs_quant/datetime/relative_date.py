@@ -101,27 +101,34 @@ class RelativeDate:
         return result
 
     def _get_rules(self) -> List[str]:
-        rule_list = []
-        current_rule = ''
-        if not len(self.rule):
+        rule = self.rule
+        if not rule:
             raise MqValueError('Invalid Rule ""')
-        current_alpha = self.rule[0].isalpha()
-        for c in self.rule:
-            is_alpha = c.isalpha()
+        rule_list = []
+        length = len(rule)
+        start = 0
+        # current_alpha: whether we're currently in a "letters" section of the rule
+        current_alpha = rule[0].isalpha()
+        # Only process if the rule is more than one character
+        for i in range(1, length):
+            is_alpha = rule[i].isalpha()
+            # If there's a transition from alpha <-> not alpha, cut off here
             if current_alpha and not is_alpha:
-                if current_rule.startswith('+'):
-                    rule_list.append(current_rule[1:])
+                # process rule[start:i]
+                if rule[start] == '+':
+                    rule_list.append(rule[start+1:i])
                 else:
-                    rule_list.append(current_rule)
-                current_rule = ''
+                    rule_list.append(rule[start:i])
+                start = i
                 current_alpha = False
-            if is_alpha:
+            elif not current_alpha and is_alpha:
                 current_alpha = True
-            current_rule += c
-        if current_rule.startswith('+'):
-            rule_list.append(current_rule[1:])
+            # No else: continue accumulating
+        # Add last segment
+        if rule[start] == '+':
+            rule_list.append(rule[start+1:])
         else:
-            rule_list.append(current_rule)
+            rule_list.append(rule[start:])
         return rule_list
 
     def __handle_rule(self,
