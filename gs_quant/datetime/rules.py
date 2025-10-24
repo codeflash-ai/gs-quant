@@ -61,25 +61,48 @@ class RDateRule(ABC):
         if self.holiday_calendar is not None:
             if self.usd_calendar is None:
                 return self.holiday_calendar
-            return list(set().union(self.holiday_calendar, self.usd_calendar))
+            if self.usd_calendar is self.holiday_calendar:
+                return self.holiday_calendar
+            seen = set()
+            union = []
+            for d in self.holiday_calendar:
+                if d not in seen:
+                    seen.add(d)
+                    union.append(d)
+            for d in self.usd_calendar:
+                if d not in seen:
+                    seen.add(d)
+                    union.append(d)
+            return union
+        
+        currencies = []
+        if self.currencies is not None:
+            if isinstance(self.currencies, str):
+                currencies = [self.currencies]
+            else:
+                currencies = list(self.currencies)
+        exchanges = []
+        if self.exchanges is not None:
+            if isinstance(self.exchanges, str):
+                exchanges = [self.exchanges]
+            else:
+                exchanges = list(self.exchanges)
+        
+        if not (exchanges + currencies):
+            return []
         try:
-            currencies = [] if self.currencies is None else [self.currencies] if isinstance(self.currencies,
-                                                                                            str) else self.currencies
-            exchanges = [] if self.exchanges is None else [self.exchanges] if isinstance(self.exchanges,
-                                                                                         str) else self.exchanges
             cal = GsCalendar(exchanges + currencies)
             return cal.holidays
         except Exception as e:
-            _logger.warning('Unable to fetch holiday calendar. Try passing your own when applying a rule. {}'.format(e))
+            _logger.warning('Unable to fetch holiday calendar. Try passing your own when applying a rule. %s', e)
             return []
 
     def _apply_business_days_logic(self, holidays: List[dt.date], offset: int = None, roll: str = 'preceding'):
-        if offset is not None:
-            offset_to_use = offset
-        else:
-            offset_to_use = self.number if self.number else 0
-        return pd.to_datetime(np.busday_offset(self.result, offset_to_use, roll,
-                                               holidays=holidays, weekmask=self.week_mask)).date()
+        offset_to_use = offset if offset is not None else (self.number if self.number else 0)
+        result_np = np.datetime64(self.result)
+        business_day = np.busday_offset(result_np, offset_to_use, roll,
+                                        holidays=holidays, weekmask=self.week_mask)
+        return pd.Timestamp(business_day).date()
 
     def _get_nth_day_of_month(self, calendar_day):
         temp = self.result.replace(day=1)
