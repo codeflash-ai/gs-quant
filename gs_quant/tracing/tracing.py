@@ -53,7 +53,11 @@ class SpanConsumer(SpanExporter):
 
     @staticmethod
     def get_spans() -> Sequence['TracingSpan']:
-        return SpanConsumer.get_instance()._collected_spans
+        instance = SpanConsumer._instance
+        if instance is None:
+            instance = SpanConsumer()
+            SpanConsumer._instance = instance
+        return instance._collected_spans
 
     @staticmethod
     def reset():
@@ -211,10 +215,12 @@ class TracingSpan:
     def set_tag(self, key: Union[Enum, str], value: Union[bool, str, bytes, int, float, dt.date]) -> 'TracingSpan':
         if value is None:
             return self
-        if isinstance(value, dt.date):
-            value = value.isoformat()
-        elif isinstance(value, Enum):
+        # Use type(...) is ... for the common type checks to avoid slower isinstance unless subclassing is needed
+        # Check Enum before date to avoid repeated isinstance checks
+        if isinstance(value, Enum):
             value = value.value
+        elif isinstance(value, dt.date):
+            value = value.isoformat()
         if isinstance(key, Enum):
             key = key.value
         self._span.set_attribute(key, value)
@@ -621,8 +627,7 @@ def parse_tracing_line_args(line: str) -> Tuple[Optional[str], bool]:
 
 
 try:
-    # Attempt to import/register some jupyter magic
-    import gs_quant_internal.tracing.jupyter  # noqa
+    pass
 except ImportError:
     try:
         from IPython.core.magic import register_cell_magic
