@@ -81,5 +81,6 @@ class DataGridFilter:
 
     @classmethod
     def from_dict(cls, dict_):
-        class_fields = {f.name for f in fields(cls)}
-        return DataGridFilter(**{k: v for k, v in dict_.items() if k in class_fields})
+        if not hasattr(cls, '_field_names'):
+            cls._field_names = {f.name for f in fields(cls)}
+        return DataGridFilter(**{k: v for k, v in dict_.items() if k in cls._field_names})
