@@ -49,7 +49,7 @@ class LastProcessor(BaseProcessor):
         a_data = self.children_data.get('a')
         if isinstance(a_data, ProcessorResult):
             if a_data.success and isinstance(a_data.data, pd.Series):
-                self.value = ProcessorResult(True, pd.Series(a_data.data[-1:]))
+                self.value = ProcessorResult(True, a_data.data.iloc[-1:])
 
         return self.value
 
