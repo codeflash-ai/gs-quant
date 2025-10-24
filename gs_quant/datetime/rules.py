@@ -20,7 +20,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Union
 
-from dateutil.relativedelta import relativedelta, FR, SA, SU, TH, TU, WE, MO
+from dateutil.relativedelta import relativedelta, FR, SA, SU, TU, WE, MO
 import numpy as np
 import pandas as pd
 
@@ -192,7 +192,16 @@ class RRule(RDateRule):
 
 class SRule(RDateRule):
     def handle(self) -> dt.date:
-        return self.result + relativedelta(weekday=TH(self.number))
+        curr_wd = self.result.weekday()
+        if self.number > 0:
+            days_ahead = (3 - curr_wd) % 7 + (self.number - 1) * 7
+            return self.result + dt.timedelta(days=days_ahead)
+        elif self.number == 0:
+            days_ahead = (3 - curr_wd) % 7
+            return self.result if curr_wd == 3 else self.result + dt.timedelta(days=days_ahead)
+        else:
+            days_behind = (curr_wd - 3) % 7 + (-self.number - 1) * 7
+            return self.result - dt.timedelta(days=days_behind)
 
 
 class TRule(RDateRule):
