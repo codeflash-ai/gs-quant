@@ -119,8 +119,14 @@ class dRule(RDateRule):
 
 class eRule(RDateRule):
     def handle(self) -> dt.date:
-        month_range = calendar.monthrange(self.result.year, self.result.month)
-        return self.result.replace(day=month_range[1])
+        month = self.result.month
+        if month == 2:
+            day = 29 if (self.result.year % 4 == 0 and (self.result.year % 100 != 0 or self.result.year % 400 == 0)) else 28
+        elif month in (4, 6, 9, 11):
+            day = 30
+        else:
+            day = 31
+        return self.result.replace(day=day)
 
 
 class FRule(RDateRule):
