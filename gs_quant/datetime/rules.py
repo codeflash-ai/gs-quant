@@ -142,7 +142,11 @@ class NRule(RDateRule):
 
 class GRule(RDateRule):
     def handle(self) -> dt.date:
-        return self.result + relativedelta(weekday=FR(self.number))
+        if self.number == 1:
+            days_ahead = (4 - self.result.weekday()) % 7
+            return self.result + dt.timedelta(days=days_ahead)
+        else:
+            return self.result + relativedelta(weekday=FR(self.number))
 
 
 class IRule(RDateRule):
