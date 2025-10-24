@@ -69,11 +69,18 @@ class DataHandler(object):
             return state
 
     def get_data(self, state: Union[dt.date, dt.datetime], *key):
-        self._clock.time_check(state)
-        return self._data_mgr.get_data(self._utc_time(state), *key)
+        clock = self._clock
+        utc_time = self._utc_time
+        clock.time_check(state)
+        return self._data_mgr.get_data(utc_time(state), *key)
 
     def get_data_range(self, start: Union[dt.date, dt.datetime], end: Union[dt.date, dt.datetime], *key):
-        self._clock.time_check(end)
+        clock = self._clock
+        utc_time = self._utc_time
+        clock.time_check(end)
         if type(start) is not type(end):
             raise RuntimeError('expect same type for start and end when asking for data range')
-        return self._data_mgr.get_data_range(self._utc_time(start), self._utc_time(end), *key)
+        # Cache the utc conversion for both start and end to avoid redundant function calls
+        start_utc = utc_time(start)
+        end_utc = utc_time(end)
+        return self._data_mgr.get_data_range(start_utc, end_utc, *key)
