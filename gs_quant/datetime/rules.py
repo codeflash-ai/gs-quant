@@ -114,7 +114,8 @@ class bRule(RDateRule):
 
 class dRule(RDateRule):
     def handle(self) -> dt.date:
-        return self.result + relativedelta(days=self.number)
+        # Avoid external relativedelta when a simple timedelta suffices for days addition
+        return self.result + dt.timedelta(days=self.number)
 
 
 class eRule(RDateRule):
