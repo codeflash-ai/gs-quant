@@ -78,7 +78,7 @@ class RDateRule(ABC):
             offset_to_use = offset
         else:
             offset_to_use = self.number if self.number else 0
-        return pd.to_datetime(np.busday_offset(self.result, offset_to_use, roll,
+        return pd.Timestamp(np.busday_offset(self.result, offset_to_use, roll,
                                                holidays=holidays, weekmask=self.week_mask)).date()
 
     def _get_nth_day_of_month(self, calendar_day):
