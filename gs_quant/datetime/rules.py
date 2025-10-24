@@ -182,7 +182,7 @@ class PRule(RDateRule):
 
 class rRule(RDateRule):
     def handle(self) -> dt.date:
-        return self.result.replace(month=12, day=31) + relativedelta(years=self.number)
+        return dt.date(self.result.year + self.number, 12, 31)
 
 
 class RRule(RDateRule):
