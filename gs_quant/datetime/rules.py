@@ -58,28 +58,54 @@ class RDateRule(ABC):
         pass
 
     def _get_holidays(self) -> List[dt.date]:
-        if self.holiday_calendar is not None:
-            if self.usd_calendar is None:
-                return self.holiday_calendar
-            return list(set().union(self.holiday_calendar, self.usd_calendar))
+        # Fast-path: no calendars at all
+        if self.holiday_calendar is None and self.usd_calendar is None and not self.currencies and not self.exchanges:
+            return []
+        # Directly return holiday_calendar if usd_calendar is None
+        if self.holiday_calendar is not None and self.usd_calendar is None:
+            return self.holiday_calendar
+        # Merge holiday_calendar and usd_calendar efficiently if both are present
+        if self.holiday_calendar is not None and self.usd_calendar is not None:
+            # Avoid the overhead of set().union() on large lists
+            seen = set(self.holiday_calendar)
+            merged = list(self.holiday_calendar)
+            for d in self.usd_calendar:
+                if d not in seen:
+                    seen.add(d)
+                    merged.append(d)
+            return merged
         try:
-            currencies = [] if self.currencies is None else [self.currencies] if isinstance(self.currencies,
-                                                                                            str) else self.currencies
-            exchanges = [] if self.exchanges is None else [self.exchanges] if isinstance(self.exchanges,
-                                                                                         str) else self.exchanges
+            # Efficiently build list from currencies/exchanges (avoid unnecessary list concat and isinstance checks)
+            currencies = []
+            if self.currencies is not None:
+                if isinstance(self.currencies, str):
+                    currencies.append(self.currencies)
+                else:
+                    currencies.extend(self.currencies)
+            exchanges = []
+            if self.exchanges is not None:
+                if isinstance(self.exchanges, str):
+                    exchanges.append(self.exchanges)
+                else:
+                    exchanges.extend(self.exchanges)
+            if not currencies and not exchanges:
+                return []
             cal = GsCalendar(exchanges + currencies)
             return cal.holidays
         except Exception as e:
-            _logger.warning('Unable to fetch holiday calendar. Try passing your own when applying a rule. {}'.format(e))
+            _logger.warning(
+                'Unable to fetch holiday calendar. Try passing your own when applying a rule. {}'.format(e)
+            )
             return []
 
     def _apply_business_days_logic(self, holidays: List[dt.date], offset: int = None, roll: str = 'preceding'):
-        if offset is not None:
-            offset_to_use = offset
-        else:
-            offset_to_use = self.number if self.number else 0
-        return pd.to_datetime(np.busday_offset(self.result, offset_to_use, roll,
-                                               holidays=holidays, weekmask=self.week_mask)).date()
+        # Eliminate variable lookups by directly setting offset_to_use
+        offset_to_use = offset if offset is not None else (self.number or 0)
+        # Use numpy arrays for holidays if length is large (saves pandas conversions)
+        hol = holidays if not holidays else np.array(holidays, dtype='datetime64[D]')
+        # Only use numpy.busday_offset and pandas to_datetime if necessary
+        result_date = np.busday_offset(self.result, offset_to_use, roll, holidays=hol, weekmask=self.week_mask)
+        return pd.to_datetime(result_date).date()
 
     def _get_nth_day_of_month(self, calendar_day):
         temp = self.result.replace(day=1)
