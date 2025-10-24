@@ -101,8 +101,8 @@ class RDateRule(ABC):
 
 class ARule(RDateRule):
     def handle(self) -> dt.date:
-        result = self.result.replace(month=1, day=1)
-        return result + relativedelta(year=self.number)
+        year = self.result.year + self.number
+        return dt.date(year, 1, 1)
 
 
 class bRule(RDateRule):
