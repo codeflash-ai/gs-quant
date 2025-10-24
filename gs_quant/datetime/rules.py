@@ -20,7 +20,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Union
 
-from dateutil.relativedelta import relativedelta, FR, SA, SU, TH, TU, WE, MO
+from dateutil.relativedelta import relativedelta, FR, SA, SU, TH, WE, MO
 import numpy as np
 import pandas as pd
 
@@ -216,7 +216,29 @@ class uRule(RDateRule):
 
 class URule(RDateRule):
     def handle(self) -> dt.date:
-        return self.result + relativedelta(weekday=TU(self.number))
+        # Optimization: Avoid constructing relativedelta for trivial weekday shifts -
+        # The relativedelta obj here is essentially used for "find n-th Tuesday after result".
+        result_date = self.result
+        number = self.number
+
+        # Get the weekday of result_date (0=Monday, ..., 6=Sunday)
+        weekday_result = result_date.weekday()
+        target_weekday = 1  # TU().weekday
+
+        # If self.number > 0: find Nth Tuesday on/after result_date
+        if number > 0:
+            days_ahead = (target_weekday - weekday_result + 7) % 7
+            # If days_ahead is 0, today is Tuesday; count as first only if number==1
+            # Add 7*(number-1) days for nth Tuesday (inclusive of 'today' if 'today' is TU)
+            dt_offset = days_ahead + 7 * (number - 1)
+        # If self.number < 0: find Nth Tuesday on/before result_date
+        elif number < 0:
+            days_behind = (weekday_result - target_weekday + 7) % 7
+            dt_offset = -days_behind + 7 * (number + 1)
+        else:  # number == 0, fall back to original behavior (should match dateutil)
+            return result_date
+
+        return result_date + dt.timedelta(days=dt_offset)
 
 
 class vRule(RDateRule):
