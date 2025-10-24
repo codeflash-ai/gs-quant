@@ -20,6 +20,7 @@ from gs_quant.backtests.core import TimeWindow, ValuationFixingType
 from gs_quant.backtests.data_handler import DataHandler
 import numpy as np
 import datetime as dt
+import math
 
 
 class OrderBase(metaclass=ABCMeta):
@@ -49,10 +50,14 @@ class OrderBase(metaclass=ABCMeta):
 
     def execution_price(self, data_handler: DataHandler) -> float:
         price = self._execution_price(data_handler)
-        if np.isnan(price):
-            raise RuntimeError('can not compute the execution price')
+        if isinstance(price, float):
+            import math
+            if math.isnan(price):
+                raise RuntimeError('can not compute the execution price')
         else:
-            return price
+            if np.isnan(price):
+                raise RuntimeError('can not compute the execution price')
+        return price
 
     def execution_quantity(self) -> float:
         raise RuntimeError('The method execution_price is not implemented on OrderBase')
@@ -202,10 +207,26 @@ class OrderTwapBTIC(OrderTWAP):
 
     def _execution_price(self, data_handler: DataHandler) -> float:
         if self.executed_price is None:
-            btic_fixings = data_handler.get_data_range(self.window.start, self.window.end,
-                                                       self.btic_instrument, ValuationFixingType.PRICE)
-            btic_twap = np.mean(btic_fixings)
-            close = data_handler.get_data(self.window.end.date(), self.future_underlying)
+            window = self.window
+            btic_instrument = self.btic_instrument
+            future_underlying = self.future_underlying
+            # Avoid repeated attribute lookups in method calls
+            get_data_range = data_handler.get_data_range
+            get_data = data_handler.get_data
+
+            btic_fixings = get_data_range(window.start, window.end,
+                                          btic_instrument, ValuationFixingType.PRICE)
+            # Use a faster mean calculation for Python lists/tuples
+            try:
+                n = len(btic_fixings)
+                if n == 0:
+                    btic_twap = float('nan')  # preserve np.mean behavior on empty
+                else:
+                    btic_twap = math.fsum(btic_fixings) / n
+            except TypeError:
+                btic_twap = np.mean(btic_fixings)
+
+            close = get_data(window.end.date(), future_underlying)
             self.executed_price = close + btic_twap
         return self.executed_price
 
