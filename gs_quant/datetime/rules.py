@@ -22,7 +22,6 @@ from typing import List, Union
 
 from dateutil.relativedelta import relativedelta, FR, SA, SU, TH, TU, WE, MO
 import numpy as np
-import pandas as pd
 
 from gs_quant.datetime.gscalendar import GsCalendar
 from gs_quant.markets.securities import ExchangeCode
@@ -78,8 +77,8 @@ class RDateRule(ABC):
             offset_to_use = offset
         else:
             offset_to_use = self.number if self.number else 0
-        return pd.to_datetime(np.busday_offset(self.result, offset_to_use, roll,
-                                               holidays=holidays, weekmask=self.week_mask)).date()
+        result_date = np.busday_offset(self.result, offset_to_use, roll, holidays=holidays, weekmask=self.week_mask)
+        return dt.date.fromisoformat(str(result_date))
 
     def _get_nth_day_of_month(self, calendar_day):
         temp = self.result.replace(day=1)
@@ -221,10 +220,14 @@ class URule(RDateRule):
 
 class vRule(RDateRule):
     def handle(self) -> dt.date:
-        self.result = self.result + relativedelta(months=self.number) if self.number else self.result
-        month_range = calendar.monthrange(self.result.year, self.result.month)
-        self.result = self.result.replace(day=month_range[1])
+        # Calculate resulting date for end-of-month logic
+        r = self.result + relativedelta(months=self.number) if self.number else self.result
+        # monthrange returns tuple (firstweekday, number of days)
+        last_day = calendar.monthrange(r.year, r.month)[1]
+        r = r.replace(day=last_day)
         holidays = self._get_holidays()
+        # Use member variable only for internal state consistency
+        self.result = r
         return self._apply_business_days_logic(holidays, offset=0, roll='backward')
 
 
