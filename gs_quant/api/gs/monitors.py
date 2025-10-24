@@ -35,10 +35,23 @@ class GsMonitorsApi:
                      folder_name: str = None,
                      monitor_type: str = None,
                      tags: str = None) -> Tuple[Monitor, ...]:
-        query_string = urlencode(dict(filter(lambda item: item[1] is not None,
-                                             dict(id=monitor_id, ownerId=owner_id, name=name, folderName=folder_name,
-                                                  type=monitor_type, tags=tags, limit=limit).items())))
-        return GsSession.current._get('/monitors?{query}'.format(query=query_string), cls=Monitor)['results']
+        params = {}
+        if monitor_id is not None:
+            params['id'] = monitor_id
+        if owner_id is not None:
+            params['ownerId'] = owner_id
+        if name is not None:
+            params['name'] = name
+        if folder_name is not None:
+            params['folderName'] = folder_name
+        if monitor_type is not None:
+            params['type'] = monitor_type
+        if tags is not None:
+            params['tags'] = tags
+        params['limit'] = limit
+
+        query_string = urlencode(params)
+        return GsSession.current._get(f'/monitors?{query_string}', cls=Monitor)['results']
 
     @classmethod
     def get_monitor(cls, monitor_id: str) -> Monitor:
