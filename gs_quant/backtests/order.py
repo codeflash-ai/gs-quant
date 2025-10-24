@@ -20,6 +20,7 @@ from gs_quant.backtests.core import TimeWindow, ValuationFixingType
 from gs_quant.backtests.data_handler import DataHandler
 import numpy as np
 import datetime as dt
+import math
 
 
 class OrderBase(metaclass=ABCMeta):
@@ -49,10 +50,9 @@ class OrderBase(metaclass=ABCMeta):
 
     def execution_price(self, data_handler: DataHandler) -> float:
         price = self._execution_price(data_handler)
-        if np.isnan(price):
+        if math.isnan(price):
             raise RuntimeError('can not compute the execution price')
-        else:
-            return price
+        return price
 
     def execution_quantity(self) -> float:
         raise RuntimeError('The method execution_price is not implemented on OrderBase')
