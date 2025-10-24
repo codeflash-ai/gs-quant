@@ -82,10 +82,12 @@ class RDateRule(ABC):
                                                holidays=holidays, weekmask=self.week_mask)).date()
 
     def _get_nth_day_of_month(self, calendar_day):
-        temp = self.result.replace(day=1)
-        adj = (calendar_day - temp.weekday()) % 7
-        temp += relativedelta(days=adj)
-        temp += relativedelta(weeks=self.number - 1)
+        # Avoid creating temporary objects for performance
+        first_day = self.result.replace(day=1)
+        weekday_of_first = first_day.weekday()
+        adj = (calendar_day - weekday_of_first) % 7
+        # Use datetime.date arithmetic instead of relativedelta for small increments
+        temp = first_day + dt.timedelta(days=adj + 7 * (self.number - 1))
         return temp
 
     def add_years(self, holidays: List[dt.date]):
