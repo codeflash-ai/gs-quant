@@ -64,8 +64,11 @@ class DataGridSort:
 
     @classmethod
     def from_dict(cls, dict_):
-        class_fields = {f.name for f in fields(cls)}
-        return DataGridSort(**{k: v for k, v in dict_.items() if k in class_fields})
+        # Cache the class fields set on first use for better performance
+        # Use class-level attribute to avoid recomputation
+        if not hasattr(cls, '_datagrid_class_fields'):
+            cls._datagrid_class_fields = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in dict_.items() if k in cls._datagrid_class_fields})
 
 
 @dataclass
