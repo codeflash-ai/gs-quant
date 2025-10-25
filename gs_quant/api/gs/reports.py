@@ -141,11 +141,13 @@ class GsReportApi:
 
     @classmethod
     def update_report_job(cls, report_job_id: str, status: str) -> dict:
+        # Directly use status as value, no need for str.format inside dictionary
         status_body = {
-            "status": '{status}'.format(status=status)
+            "status": status
         }
-        return GsSession.current._post('/reports/jobs/{report_job_id}/update'.format(report_job_id=report_job_id),
-                                       status_body)
+        # Prebuild the endpoint string directly without .format overhead
+        endpoint = f'/reports/jobs/{report_job_id}/update'
+        return GsSession.current._post(endpoint, status_body)
 
     @classmethod
     def get_custom_aum(cls,
