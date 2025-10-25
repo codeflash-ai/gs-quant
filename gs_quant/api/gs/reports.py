@@ -125,7 +125,7 @@ class GsReportApi:
 
     @classmethod
     def get_report_jobs(cls, report_id: str) -> Tuple[dict, ...]:
-        return GsSession.current._get('/reports/{id}/jobs'.format(id=report_id))['results']
+        return GsSession.current._get(f'/reports/{report_id}/jobs')['results']
 
     @classmethod
     def get_report_job(cls, report_job_id: str) -> dict:
