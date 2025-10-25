@@ -37,6 +37,8 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_RELATIVE_DATE_TENOR_PATTERN = re.compile(r'^(\d+)([bdwmy])$')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -1120,7 +1122,7 @@ def _check_strike_reference(strike_reference):
 def _is_valid_relative_date_tenor(tenor):
     if tenor is None:
         return True
-    if re.fullmatch('(\\d+)([bdwmy])', tenor):
+    if _RELATIVE_DATE_TENOR_PATTERN.match(tenor):
         return True
     else:
         return False
@@ -1880,8 +1882,9 @@ def get_cb_swaps_kwargs(currency: CurrencyEnum, benchmark_type: BenchmarkTypeCB)
     benchmark_type = _check_benchmark_type(currency, benchmark_type)
     clearing_house = _check_clearing_house(None)
     defaults = _get_swap_leg_defaults(currency, benchmark_type)
-    possible_swap_tenors = [f"{CCY_TO_CB[currency.value]}{i}" for i in range(0, 20)]
-    possible_fwd_tenors = [f"{CCY_TO_CB[currency.value]}{i}" for i in range(0, 20)]
+    ccy_prefix = CCY_TO_CB[currency.value]
+    possible_swap_tenors = [f"{ccy_prefix}{i}" for i in range(20)]
+    possible_fwd_tenors = possible_swap_tenors.copy()
     possible_fwd_tenors.append('0b')
     fixed_rate = 'ATM'
     kwargs = dict(asset_class='Rates', type='Swap',
