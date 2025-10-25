@@ -305,13 +305,13 @@ def aum(report_id: str, *, source: str = None,
     end_date = DataContext.current.end_time.date()
     performance_report = PerformanceReport.get(report_id)
     aum_curve = performance_report.get_aum(start_date=start_date, end_date=end_date)
-    aum_dict = [{'date': key, 'aum': aum_curve[key]} for key in aum_curve]
-
-    # Create and return timeseries
-    df = pd.DataFrame(aum_dict)
-    if not df.empty:
-        df = df.set_index('date')
-        df.index = pd.to_datetime(df.index)
+    # Use pd.Series for direct construction, avoid expensive set_index
+    if aum_curve:
+        idx = pd.to_datetime(list(aum_curve.keys()))
+        s = pd.Series(list(aum_curve.values()), index=idx, name='aum')
+        df = s.to_frame()
+    else:
+        df = pd.DataFrame(columns=['aum'])
     return _extract_series_from_df(df, QueryType.AUM)
 
 
