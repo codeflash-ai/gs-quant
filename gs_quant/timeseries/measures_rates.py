@@ -37,6 +37,12 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_swap_tenor_regexes = {}
+
+_forward_tenor_regexes = {}
+
+_RELATIVE_DATE_TENOR_PATTERN = re.compile(r'^(\d+)([bdwmy])$')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -323,7 +329,8 @@ def _pricing_location_normalized(location: PricingLocation, ccy: CurrencyEnum) -
 
 
 def _default_pricing_location(ccy: CurrencyEnum) -> PricingLocation:
-    if ccy in CURRENCY_TO_PRICING_LOCATION.keys():
+    # Remove redundant .keys(), use O(1) dict lookup
+    if ccy in CURRENCY_TO_PRICING_LOCATION:
         return CURRENCY_TO_PRICING_LOCATION.get(ccy, PricingLocation.LDN)
     else:
         raise MqValueError('No default location set for currency ' + ccy.value + ', please provide one.')
@@ -1120,7 +1127,7 @@ def _check_strike_reference(strike_reference):
 def _is_valid_relative_date_tenor(tenor):
     if tenor is None:
         return True
-    if re.fullmatch('(\\d+)([bdwmy])', tenor):
+    if _RELATIVE_DATE_TENOR_PATTERN.match(tenor):
         return True
     else:
         return False
@@ -1902,10 +1909,16 @@ def get_cb_meeting_swaps(currency: CurrencyEnum, benchmark_type: BenchmarkTypeCB
 
 def get_cb_meeting_swap(currency: CurrencyEnum, benchmark_type: BenchmarkTypeCB, forward_tenor: str,
                         swap_tenor: str) -> str:
-    kwargs = get_cb_swaps_kwargs(currency=currency, benchmark_type=benchmark_type)
-    if not (re.fullmatch(f"({CCY_TO_CB[currency.value]}[0-9]|1[0-9])", swap_tenor) or
-            re.fullmatch(f"({CCY_TO_CB[currency.value]}[0-9]|1[0-9]|0b)", forward_tenor)):
+    ccy_val = currency.value
+    # Pre-compile regex once per currency
+    if ccy_val not in _swap_tenor_regexes:
+        _swap_tenor_regexes[ccy_val] = re.compile(f"({CCY_TO_CB[ccy_val]}[0-9]|1[0-9])")
+        _forward_tenor_regexes[ccy_val] = re.compile(f"({CCY_TO_CB[ccy_val]}[0-9]|1[0-9]|0b)")
+    swap_pat = _swap_tenor_regexes[ccy_val]
+    fwd_pat = _forward_tenor_regexes[ccy_val]
+    if not (swap_pat.fullmatch(swap_tenor) or fwd_pat.fullmatch(forward_tenor)):
         raise MqValueError('invalid swap tenor ' + swap_tenor)
+    kwargs = get_cb_swaps_kwargs(currency=currency, benchmark_type=benchmark_type)
     kwargs['asset_parameters_termination_date'] = swap_tenor
     kwargs['asset_parameters_effective_date'] = forward_tenor
     return _get_tdapi_rates_assets(**kwargs)
@@ -2087,12 +2100,13 @@ def _get_default_ois_benchmark(currency: CurrencyEnum) -> BenchmarkTypeCB:
 def _check_cb_ccy_benchmark_rt(asset: Asset, benchmark_type: BenchmarkTypeCB) -> tuple:
     bbid = asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
     currency = CurrencyEnum(bbid)
-    if currency not in [CurrencyEnum.EUR, CurrencyEnum.GBP, CurrencyEnum.USD]:
+    # Use tuple for quick membership test
+    if currency not in (CurrencyEnum.EUR, CurrencyEnum.GBP, CurrencyEnum.USD):
         raise MqValueError('Only EUR, GBP and USD are supported for real time Central Bank swap data')
     if benchmark_type is None:
         benchmark_type = _get_default_ois_benchmark(currency)
-    if isinstance(benchmark_type, BenchmarkTypeCB) and \
-            benchmark_type.value not in CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value].keys():
+    ccy_bench = CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value]
+    if isinstance(benchmark_type, BenchmarkTypeCB) and benchmark_type.value not in ccy_bench:
         raise MqValueError('%s is not supported for %s', benchmark_type.value, currency.value)
     return currency, benchmark_type
 
@@ -2163,16 +2177,16 @@ def policy_rate_term_structure_rt(asset: Asset, event_type: EventType = EventTyp
     if event_type == EventType.SPOT:
         if rate_type == RateType.RELATIVE:
             raise MqValueError('rate_type must be absolute for event_type = Spot')
-        else:
-            mqid = get_cb_meeting_swap(currency, benchmark_type=benchmark_type, forward_tenor='0b',
-                                       swap_tenor=f"{CCY_TO_CB[currency.value]}1")
-            spot_df = get_cb_swap_data(currency, [mqid])
-            if spot_df.empty:
-                raise MqValueError('no spot data returned')
-            series = ExtendedSeries(spot_df['rate'])
-            series.dataset_ids = (Dataset.GS.IR_SWAP_RATES_INTRADAY_CALC_BANK,)
-            return series
-    elif event_type == EventType.MEETING:
+        mqid = get_cb_meeting_swap(currency, benchmark_type=benchmark_type, forward_tenor='0b',
+                                   swap_tenor=f"{CCY_TO_CB[currency.value]}1")
+        spot_df = get_cb_swap_data(currency, [mqid])
+        if spot_df.empty:
+            raise MqValueError('no spot data returned')
+        series = ExtendedSeries(spot_df['rate'])
+        series.dataset_ids = (Dataset.GS.IR_SWAP_RATES_INTRADAY_CALC_BANK,)
+        return series
+
+    if event_type == EventType.MEETING:
         mqids = get_cb_meeting_swaps(currency, benchmark_type=benchmark_type)
         cbw_df = get_cb_swap_data(currency, rate_mqids=mqids)
         if cbw_df.empty:
@@ -2186,31 +2200,39 @@ def policy_rate_term_structure_rt(asset: Asset, event_type: EventType = EventTyp
         spot_df = get_cb_swap_data(currency, spot_id)
         if spot_df.empty:
             raise MqValueError('no spot data returned to rebase')
-        joined_df = cbw_df.merge(spot_df,
-                                 on=['time', 'pricingLocation', 'csaTerms', 'currency'],
-                                 how='inner',
-                                 suffixes=['_meeting', '_spot'])
-        joined_df['rate'] = (joined_df['rate_meeting'] - joined_df['rate_spot'])
-        joined_df = joined_df.rename(columns={'effectiveDate_meeting': 'effectiveDate'})
+        # Merge only the necessary columns to minimize memory
+        joined_df = cbw_df.merge(
+            spot_df,
+            on=['time', 'pricingLocation', 'csaTerms', 'currency'],
+            how='inner',
+            suffixes=['_meeting', '_spot']
+        )
+        joined_df['rate'] = joined_df['rate_meeting'] - joined_df['rate_spot']
+        joined_df.rename(columns={'effectiveDate_meeting': 'effectiveDate'}, inplace=True)
     else:
         joined_df = cbw_df
 
     if joined_df.empty:
         series = ExtendedSeries(dtype=float)
+        series.dataset_ids = getattr(joined_df, 'dataset_ids', ())
+        check_forward_looking(None, source, 'policy_rate_term_structure')
+        return series
     else:
         latest = joined_df.index.max()
         _logger.info('selected pricing date %s', latest)
-        joined_df = joined_df.loc[latest]
+        latest_row_df = joined_df.loc[latest]
         biz_day = _get_custom_bd(_default_pricing_location(currency).value)
-        # col_to_plot = 'effectiveTenor'
         col_to_plot = 'effectiveDate'
-        joined_df.loc[:, 'expirationDate'] = joined_df[col_to_plot].apply(_get_term_struct_date,
-                                                                          args=(latest, biz_day))
-        joined_df = joined_df.set_index('expirationDate')
-        joined_df = joined_df.sort_index()
-        joined_df = joined_df.loc[DataContext.current.start_date: DataContext.current.end_date]
-        series = ExtendedSeries(dtype=float) if joined_df.empty else ExtendedSeries(joined_df['rate'])
-    series.dataset_ids = getattr(joined_df, 'dataset_ids', ())
-    if series.empty:  # Raise descriptive error if no data returned + date context is in the past
-        check_forward_looking(None, source, 'policy_rate_term_structure')
-    return series
+        # Use DataFrame.assign (faster for new columns)
+        latest_row_df = latest_row_df.assign(
+            expirationDate=latest_row_df[col_to_plot].apply(_get_term_struct_date, args=(latest, biz_day))
+        )
+        latest_row_df.set_index('expirationDate', inplace=True)
+        latest_row_df.sort_index(inplace=True)
+        # Efficient slicing
+        filtered_df = latest_row_df.loc[DataContext.current.start_date: DataContext.current.end_date]
+        series = ExtendedSeries(dtype=float) if filtered_df.empty else ExtendedSeries(filtered_df['rate'])
+        series.dataset_ids = getattr(joined_df, 'dataset_ids', ())
+        if series.empty:
+            check_forward_looking(None, source, 'policy_rate_term_structure')
+        return series
