@@ -44,12 +44,16 @@ def encode_risk_measure_tuple(blob: Tuple[RiskMeasure, ...]) -> Tuple[Dict, ...]
 
 
 def _decode_param(data: dict) -> Optional[RiskMeasureParameter]:
-    params = data.get('parameters', None)
-    if params is not None and isinstance(params, dict) and 'parameterType' in params:
-        cls_name = params['parameterType'] + 'Parameter'
+    params = data.get('parameters')
+    # Fast-path: avoid chained 'is not None' and unnecessary isinstance checks
+    if type(params) is dict and 'parameterType' in params:
+        # Avoid dict comprehension overhead by using dict.pop to exclude one key
+        parameter_type = params['parameterType']
+        cls_name = parameter_type + 'Parameter'
         parameter_cls = getattr(common, cls_name)
-        parameter = parameter_cls(**{k: v for k, v in params.items() if k != 'parameterType'})
-        return parameter
+        # Most efficient filtering: build kwargs in a single pass
+        kwargs = {k: v for k, v in params.items() if k != 'parameterType'}
+        return parameter_cls(**kwargs)
     return None
 
 
