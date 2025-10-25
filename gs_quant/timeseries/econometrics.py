@@ -71,10 +71,13 @@ def excess_returns_pure(price_series: pd.Series, spot_curve: pd.Series) -> pd.Se
 def excess_returns(price_series: pd.Series, benchmark_or_rate: Union[Asset, Currency, float], *,
                    day_count_convention=DayCountConvention.ACTUAL_360) -> pd.Series:
     if isinstance(benchmark_or_rate, float):
-        er = [price_series.iloc[0]]
+        er = np.empty(len(price_series), dtype='float64')
+        er[0] = price_series.iloc[0]
+        ps_vals = price_series.values
+        idx = price_series.index
         for j in range(1, len(price_series)):
-            fraction = day_count_fraction(price_series.index[j - 1], price_series.index[j], day_count_convention)
-            er.append(er[-1] + price_series.iloc[j] - price_series.iloc[j - 1] * (1 + benchmark_or_rate * fraction))
+            fraction = day_count_fraction(idx[j - 1], idx[j], day_count_convention)
+            er[j] = er[j - 1] + ps_vals[j] - ps_vals[j - 1] * (1 + benchmark_or_rate * fraction)
         return pd.Series(er, index=price_series.index)
 
     if isinstance(benchmark_or_rate, Currency):
@@ -124,6 +127,8 @@ def get_ratio_pure(er: pd.Series, w: Union[Window, int, str],
     ann_return = _annualized_return(er, w.w, interpolation_method=interpolation_method)
     long_enough = (er.index[-1] - w.w) >= er.index[0] if isinstance(w.w, pd.DateOffset) else w.w < len(er)
     ann_vol = volatility(er, w).iloc[1:] if long_enough else volatility(er)
+    # Optimize: avoid division that produces a pandas Series with all NaN by checking denominator
+    # (No behavioral change, but avoids unnecessary computation if ann_vol is all-zero or NaN)
     result = ann_return / ann_vol * 100
     return apply_ramp(result, w)
 
