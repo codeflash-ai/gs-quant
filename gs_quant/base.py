@@ -63,10 +63,11 @@ def is_instance_or_iterable(o, t):
 
 
 def _get_underscore(arg):
-    if arg not in _rename_cache:
+    try:
+        return _rename_cache[arg]
+    except KeyError:
         _rename_cache[arg] = underscore(arg)
-
-    return _rename_cache[arg]
+        return _rename_cache[arg]
 
 
 def _get_is_supported_generic(arg):
@@ -512,7 +513,7 @@ class Priceable(Base):
 
         usd_delta_f and eur_delta_f are futures, usd_delta and eur_delta are dataframes
         """
-        raise NotImplementedError
+        raise self._calc_not_implemented_error
 
 
 class __ScenarioMeta(ABCMeta, ContextMeta):
