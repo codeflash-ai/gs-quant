@@ -260,8 +260,11 @@ def thematic_exposure(report_id: str, basket_ticker: str, *, source: str = None,
                                                end_date=DataContext.current.end_date,
                                                basket_ids=[asset.get_marquee_id()])
     if not df.empty:
-        df = df.set_index('date')
-        df.index = pd.to_datetime(df.index)
+        # Faster inplace modification
+        df.set_index('date', inplace=True)
+        # Avoid unnecessary conversion if index is already datetime
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.DatetimeIndex(df.index, copy=False)
     return _extract_series_from_df(df, QueryType.THEMATIC_EXPOSURE)
 
 
