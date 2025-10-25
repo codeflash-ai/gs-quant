@@ -438,7 +438,7 @@ def sqrt(x: Union[Real, pd.Series]) -> Union[Real, pd.Series]:
 
     Return the square root of each value in time series :math:`X_t`:
 
-    :math:`R_t = \\sqrt{X_t}`
+    :math:`R_t = \sqrt{X_t}`
 
     **Examples**
 
@@ -453,11 +453,15 @@ def sqrt(x: Union[Real, pd.Series]) -> Union[Real, pd.Series]:
 
     """
     if isinstance(x, pd.Series):
-        return np.sqrt(x)
+        # Use pd.Series constructor directly to preserve pd.Series metadata more efficiently
+        values = x.values
+        sqrt_values = np.sqrt(values)
+        return pd.Series(sqrt_values, index=x.index, name=x.name, dtype=sqrt_values.dtype)
 
     result = math.sqrt(x)
-    # return int if result is integral (should work for values up to 2**53)
-    return round(result) if round(result) == result else result
+    r = round(result)
+    # Avoid double rounding of floats, more efficient int comparison
+    return r if r == result else result
 
 
 @plot_function
