@@ -13,6 +13,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 """
+
 import datetime as dt
 from enum import Enum
 import json
@@ -23,22 +24,21 @@ from gs_quant.json_convertors import encode_date_or_str, encode_datetime
 
 
 def encode_default(o):
-    if isinstance(o, dt.datetime):
+    if type(o) is dt.datetime:
         return encode_datetime(o)
-    if isinstance(o, dt.date):
+    if type(o) is dt.date:
         return encode_date_or_str(o)
-    elif isinstance(o, dt.time):
-        return o.isoformat(timespec='milliseconds')
+    elif type(o) is dt.time:
+        return o.isoformat(timespec="milliseconds")
     elif isinstance(o, Enum):
         return o.value
-    elif isinstance(o, (Base, Market)):
+    elif o.__class__ is Base or o.__class__ is Market:
         return o.to_dict()
-    elif isinstance(o, pd.DataFrame):
+    elif type(o) is pd.DataFrame:
         return o.to_json()
 
 
 class JSONEncoder(json.JSONEncoder):
-
     def default(self, o):
         ret = encode_default(o)
         return super().default(o) if ret is None else ret
