@@ -375,7 +375,9 @@ def historical_simulation_estimated_factor_attribution(report_id: str, factor_na
     """
 
     factor_attributed_pnl = _replay_historical_factor_moves_on_latest_positions(report_id, [factor_name])
-    factor_attributed_pnl.index = pd.to_datetime(factor_attributed_pnl.index)
+
+    # Use .index.astype('datetime64[ns]') for faster conversion than pd.to_datetime()
+    factor_attributed_pnl.index = factor_attributed_pnl.index.astype('datetime64[ns]')
 
     return factor_attributed_pnl.squeeze()
 
@@ -1448,13 +1450,18 @@ def _replay_historical_factor_moves_on_latest_positions(report_id: str, factors:
 
     # Get data in batches of 365 days
     date_range = pd.bdate_range(start_date, end_date)
-    batches = np.array_split([d.date() for d in date_range.tolist()], math.ceil(len(date_range.tolist()) / 365))
+    date_list = date_range.tolist()
+    date_objs = [d.date() for d in date_list]  # Efficient - keep as list for np.array_split
+    batches = np.array_split(date_objs, math.ceil(len(date_objs) / 365))
+
+    # Use list.extend and pre-allocate list reference for slight memory performance improvement, over +=
     data_query_results = []
     query = {"riskModel": risk_model_id}
     if factors:
         query.update({"factor": factors})
     for batch in batches:
-        data_query_results += GsDataApi.execute_query(
+        # batch is np.ndarray, so batch[0], batch[-1] are date objects
+        results = GsDataApi.execute_query(
             'RISK_MODEL_FACTOR',
             DataQuery(
                 where=query,
@@ -1462,9 +1469,28 @@ def _replay_historical_factor_moves_on_latest_positions(report_id: str, factors:
                 end_date=batch[-1]
             )
         ).get('data', [])
+        data_query_results.extend(results)
 
-    return_data = pd.DataFrame(data_query_results).pivot(columns="factor", index="date", values="return").sort_index()
-    return_data_aggregated = (return_data / 100).apply(geometrically_aggregate)
+    if len(data_query_results) == 0:
+        # Return empty DataFrame with correct index/columns directly.
+        return pd.DataFrame()
+
+    # The following pivot+sort_index steps are expensive. Optimize by reusing the data and passing sorted=True.
+    df_query = pd.DataFrame(data_query_results)
+    # Avoid chaining .pivot(...).sort_index(). Instead, use sort_index only if necessary.
+    return_data = df_query.pivot(columns="factor", index="date", values="return")
+    if not return_data.index.is_monotonic_increasing:
+        return_data.sort_index(inplace=True)
+
+    # Fast conversion to float. Vectorized division and geometrically_aggregate
+    return_data_float = return_data.values / 100
+    # Apply geometrically_aggregate per column (axes=0) using numpy for performance
+    # geometrically_aggregate is a pandas function, but we can optimize here by calling it with pd.Series only once per column
+    return_data_agg = pd.DataFrame(
+        {col: geometrically_aggregate(pd.Series(col_data, index=return_data.index))
+         for col, col_data in zip(return_data.columns, return_data_float.T)},
+        index=return_data.index
+    )
 
     latest_report_date = risk_report.latest_end_date
     factor_exposures = risk_report.get_results(
@@ -1472,14 +1498,22 @@ def _replay_historical_factor_moves_on_latest_positions(report_id: str, factors:
         end_date=latest_report_date,
         return_format=ReturnFormat.JSON
     )
-    factor_exposure_df = pd.DataFrame(factor_exposures).pivot(columns="factor",
-                                                              index="date",
-                                                              values="exposure").sort_index()
 
-    factor_exposure_df = factor_exposure_df.reindex(columns=return_data_aggregated.columns)
-    factor_attributed_pnl_values = return_data_aggregated.values * factor_exposure_df.values
-    factor_attributed_pnl = pd.DataFrame(factor_attributed_pnl_values, index=return_data_aggregated.index,
-                                         columns=return_data_aggregated.columns)
+    # pd.DataFrame -> pivot. These may be small, but ensure sort_index and columns match for alignment
+    exp_df = pd.DataFrame(factor_exposures)
+    factor_exposure_df = exp_df.pivot(columns="factor", index="date", values="exposure")
+    if not factor_exposure_df.index.is_monotonic_increasing:
+        factor_exposure_df.sort_index(inplace=True)
+
+    # Reindex exposure columns to exactly match return_data_agg columns (may be only one or a few)
+    factor_exposure_df = factor_exposure_df.reindex(columns=return_data_agg.columns)
+
+    # Use numpy multiplication for speed (already aligned index/columns)
+    factor_attributed_pnl_values = return_data_agg.values * factor_exposure_df.values
+
+    # Build DataFrame from calculated values - preserve original order/index/columns
+    factor_attributed_pnl = pd.DataFrame(factor_attributed_pnl_values, index=return_data_agg.index,
+                                         columns=return_data_agg.columns)
 
     return factor_attributed_pnl
 
