@@ -37,6 +37,8 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_RELATIVE_DATE_TENOR_PATTERN = re.compile(r'^(\d+)([bdwmy])$')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -504,12 +506,15 @@ class BenchmarkType(Enum):
 
 def _check_benchmark_type(currency, benchmark_type: Union[BenchmarkType, str], nothrow: bool = False) \
         -> Union[BenchmarkType, str]:
+    # Optimize member checks by using __members__ only once per path
     if isinstance(benchmark_type, str):
-        if benchmark_type.upper() in BenchmarkType.__members__:
-            benchmark_type = BenchmarkType[benchmark_type.upper()]
-        elif benchmark_type in ['fed_funds', 'Fed_Funds', 'FED_FUNDS']:
+        key_upper = benchmark_type.upper()
+        members = BenchmarkType.__members__
+        if key_upper in members:
+            benchmark_type = BenchmarkType[key_upper]
+        elif benchmark_type in {'fed_funds', 'Fed_Funds', 'FED_FUNDS'}:
             benchmark_type = BenchmarkType.Fed_Funds
-        elif benchmark_type in ['estr', 'ESTR', 'eurostr', 'EuroStr']:
+        elif benchmark_type in {'estr', 'ESTR', 'eurostr', 'EuroStr'}:
             benchmark_type = BenchmarkType.EUROSTR
         elif not nothrow:
             raise MqValueError(f'{benchmark_type} is not valid, pick one among ' +
@@ -517,24 +522,32 @@ def _check_benchmark_type(currency, benchmark_type: Union[BenchmarkType, str], n
         else:
             return benchmark_type
 
-    if isinstance(benchmark_type, BenchmarkType) and \
-            benchmark_type.value not in CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value].keys():
-        raise MqValueError(f'{benchmark_type.value} is not supported for {currency.value}')
+    # Switch to fast lookup only once per use
+    bench_type = getattr(benchmark_type, 'value', benchmark_type)
+    swap_rate_benchmark = CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value]
+    if isinstance(benchmark_type, BenchmarkType) and bench_type not in swap_rate_benchmark.keys():
+        raise MqValueError(f'{bench_type} is not supported for {currency.value}')
     else:
         return benchmark_type
 
 
 def _check_clearing_house(clearing_house: Union[_ClearingHouse, str]) -> _ClearingHouse:
-    if isinstance(clearing_house, str) and clearing_house.upper() in _ClearingHouse.__members__:
-        clearing_house = _ClearingHouse[clearing_house.upper()]
+    # Fast path for str conversion; no change to logic
+    if isinstance(clearing_house, str):
+        key_upper = clearing_house.upper()
+        members = _ClearingHouse.__members__
+        if key_upper in members:
+            clearing_house = _ClearingHouse[key_upper]
 
+    # Early return if is None - do not check its type
     if clearing_house is None:
         return _ClearingHouse.LCH
-    elif isinstance(clearing_house, _ClearingHouse):
+    # Fast type check and return
+    if isinstance(clearing_house, _ClearingHouse):
         return clearing_house
-    else:
-        raise MqValueError('invalid clearing house: ' + clearing_house + ' choose one among ' +
-                           ', '.join([ch.value for ch in _ClearingHouse]))
+    # Else, raise error, reduce repeated computation
+    raise MqValueError('invalid clearing house: ' + str(clearing_house) + ' choose one among ' +
+                       ', '.join([ch.value for ch in _ClearingHouse]))
 
 
 def _check_tenor_type(tenor_type: _SwapTenorType) -> _SwapTenorType:
@@ -579,20 +592,26 @@ def _get_benchmark_type(currency: CurrencyEnum, benchmark_type: BenchmarkType = 
 def _get_swap_leg_defaults(currency: CurrencyEnum, benchmark_type: Union[BenchmarkType, str] = None,
                            floating_rate_tenor: str = None) -> dict:
     pricing_location = CURRENCY_TO_PRICING_LOCATION.get(currency, PricingLocation.LDN)
-    # default benchmark types
+    # Only call _get_benchmark_type when needed
     if not isinstance(benchmark_type, str):
         benchmark_type_input = _get_benchmark_type(currency, benchmark_type)
     else:
         benchmark_type_input = benchmark_type
-    # default floating index
+    # Efficient lookup for default floating index; remove redundant if/else
     if floating_rate_tenor is None:
-        if benchmark_type_input in BENCHMARK_TO_DEFAULT_FLOATING_RATE_TENORS:
-            floating_rate_tenor = BENCHMARK_TO_DEFAULT_FLOATING_RATE_TENORS[benchmark_type_input]
+        tenor = BENCHMARK_TO_DEFAULT_FLOATING_RATE_TENORS.get(benchmark_type_input)
+        if tenor is not None:
+            floating_rate_tenor = tenor
         else:
             raise MqValueError(f"{benchmark_type_input} has no default fixing tenor, please specify one")
 
-    return dict(currency=currency, benchmark_type=benchmark_type_input,
-                floating_rate_tenor=floating_rate_tenor, pricing_location=pricing_location)
+    # Use direct dict constructor for efficiency
+    return {
+        'currency': currency,
+        'benchmark_type': benchmark_type_input,
+        'floating_rate_tenor': floating_rate_tenor,
+        'pricing_location': pricing_location
+    }
 
 
 def _get_swap_csa_terms(curr: str, benchmark_type: str) -> dict:
@@ -1120,7 +1139,7 @@ def _check_strike_reference(strike_reference):
 def _is_valid_relative_date_tenor(tenor):
     if tenor is None:
         return True
-    if re.fullmatch('(\\d+)([bdwmy])', tenor):
+    if _RELATIVE_DATE_TENOR_PATTERN.match(tenor):
         return True
     else:
         return False
@@ -1877,22 +1896,30 @@ class BenchmarkTypeCB(Enum):
 
 
 def get_cb_swaps_kwargs(currency: CurrencyEnum, benchmark_type: BenchmarkTypeCB) -> Dict:
-    benchmark_type = _check_benchmark_type(currency, benchmark_type)
-    clearing_house = _check_clearing_house(None)
-    defaults = _get_swap_leg_defaults(currency, benchmark_type)
-    possible_swap_tenors = [f"{CCY_TO_CB[currency.value]}{i}" for i in range(0, 20)]
-    possible_fwd_tenors = [f"{CCY_TO_CB[currency.value]}{i}" for i in range(0, 20)]
+    # Fetch once to avoid repeated lookups
+    currency_value = currency.value
+    cb_prefix = CCY_TO_CB[currency_value]
+    swap_range = range(0, 20)
+    possible_swap_tenors = [f"{cb_prefix}{i}" for i in swap_range]
+    # Reuse the same list for forward tenors; append only once
+    possible_fwd_tenors = possible_swap_tenors.copy()
     possible_fwd_tenors.append('0b')
     fixed_rate = 'ATM'
-    kwargs = dict(asset_class='Rates', type='Swap',
-                  asset_parameters_floating_rate_option=defaults['benchmark_type'],
-                  asset_parameters_fixed_rate=fixed_rate,
-                  asset_parameters_clearing_house=clearing_house.value,
-                  # asset_parameters_floating_rate_designated_maturity=defaults['floating_rate_tenor'],
-                  asset_parameters_termination_date=possible_swap_tenors,
-                  asset_parameters_effective_date=possible_fwd_tenors,
-                  asset_parameters_notional_currency=currency.value)
-    return kwargs
+    benchmark_type_checked = _check_benchmark_type(currency, benchmark_type)
+    clearing_house_enum = _check_clearing_house(None)
+    defaults = _get_swap_leg_defaults(currency, benchmark_type_checked)
+    # Construct kwargs directly for efficiency and clarity
+    return {
+        'asset_class': 'Rates',
+        'type': 'Swap',
+        'asset_parameters_floating_rate_option': defaults['benchmark_type'],
+        'asset_parameters_fixed_rate': fixed_rate,
+        'asset_parameters_clearing_house': clearing_house_enum.value,
+        # asset_parameters_floating_rate_designated_maturity: defaults['floating_rate_tenor'],
+        'asset_parameters_termination_date': possible_swap_tenors,
+        'asset_parameters_effective_date': possible_fwd_tenors,
+        'asset_parameters_notional_currency': currency_value
+    }
 
 
 def get_cb_meeting_swaps(currency: CurrencyEnum, benchmark_type: BenchmarkTypeCB) -> List:
