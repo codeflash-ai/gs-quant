@@ -42,7 +42,7 @@ class GsBaseScreenerApi:
         :return: Screener, an object containing information about the screener associated
         with screener_id.
         """
-        return GsSession.current._get('/data/screeners/{id}'.format(id=screener_id), cls=Screener)
+        return GsSession.current._get(f'/data/screeners/{screener_id}', cls=Screener)
 
     @classmethod
     def create_screener(cls, screener: Screener) -> Screener:
