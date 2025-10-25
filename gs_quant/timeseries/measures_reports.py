@@ -235,9 +235,10 @@ def short_pnl(report_id: str, *, source: str = None,
     performance_report = PerformanceReport.get(report_id)
 
     constituent_data = performance_report.get_portfolio_constituents(
-        fields=['pnl', 'quantity'], start_date=start_date, end_date=end_date).set_index('date')
-    short_leg = constituent_data[constituent_data['quantity'] < 0]['pnl']
-    short_leg = short_leg.groupby(level=0).sum()
+        fields=['pnl', 'quantity'], start_date=start_date, end_date=end_date)
+    # Vectorized filtering and grouping for better performance
+    mask = constituent_data['quantity'] < 0
+    short_leg = constituent_data.loc[mask].groupby('date')['pnl'].sum()
     return pd.Series(short_leg, name="shortPnl")
 
 
