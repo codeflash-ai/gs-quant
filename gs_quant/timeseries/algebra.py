@@ -360,7 +360,7 @@ def exp(x: pd.Series) -> pd.Series:
     :func:`log`
 
     """
-    return np.exp(x)
+    return pd.Series(np.exp(x.values), index=x.index, name=x.name)
 
 
 @plot_function
