@@ -111,13 +111,19 @@ class GsReportApi:
                           MqRateLimitedError,
                           max_tries=5)
     def schedule_report(cls, report_id: str, start_date: dt.date, end_date: dt.date, backcast: bool = False) -> dict:
+        # Optimize date formatting by avoiding method calls for known fast patterns
+        start_date_str = f'{start_date.year:04d}-{start_date.month:02d}-{start_date.day:02d}'
+        end_date_str = f'{end_date.year:04d}-{end_date.month:02d}-{end_date.day:02d}'
+
         report_schedule_request = {
-            'startDate': start_date.strftime('%Y-%m-%d'),
-            'endDate': end_date.strftime('%Y-%m-%d')
+            'startDate': start_date_str,
+            'endDate': end_date_str
         }
         if backcast:
             report_schedule_request['parameters'] = {'backcast': backcast}
-        return GsSession.current._post('/reports/{id}/schedule'.format(id=report_id), report_schedule_request)
+        # Format URL directly, avoiding .format overhead
+        url = f'/reports/{report_id}/schedule'
+        return GsSession.current._post(url, report_schedule_request)
 
     @classmethod
     def get_report_status(cls, report_id: str) -> Tuple[dict, ...]:
