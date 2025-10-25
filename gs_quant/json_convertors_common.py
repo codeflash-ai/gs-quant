@@ -25,9 +25,11 @@ from gs_quant.common import RiskMeasure, ParameterisedRiskMeasure
 from gs_quant import common
 from gs_quant import risk
 
+_risk_attrs = set(dir(risk))
+
 
 def gsq_rm_for_name(name: str) -> Optional[RiskMeasure]:
-    if name is None or name not in dir(risk):
+    if name is None or name not in _risk_attrs:
         return None
     return getattr(risk, name)
 
