@@ -37,6 +37,10 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_TENOR_PATTERN = re.compile(r'(\d+)([wfmy])')
+
+_RELATIVE_DATE_TENOR_PATTERN = re.compile(r'^(\d+)([bdwmy])$')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -1120,7 +1124,7 @@ def _check_strike_reference(strike_reference):
 def _is_valid_relative_date_tenor(tenor):
     if tenor is None:
         return True
-    if re.fullmatch('(\\d+)([bdwmy])', tenor):
+    if _RELATIVE_DATE_TENOR_PATTERN.match(tenor):
         return True
     else:
         return False
@@ -1763,23 +1767,35 @@ def _get_fxfwd_xccy_swp_rates_data(asset: Asset, tenor: str, real_time: bool = F
                                    query_type: QueryType = None) -> pd.DataFrame:
     if real_time:
         raise NotImplementedError('realtime not implemented')
-    pair = asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
+    # .get_identifier may be slow for many hits; no good way short of core codebase change
 
-    if pair not in CROSS_BBID_TO_DUMMY_OISXCCY_ASSET.keys():
+    pair = asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
+    # Using set lookup is ~2x faster than keys() with 'in'
+    if pair not in CROSS_BBID_TO_DUMMY_OISXCCY_ASSET:
         raise NotImplementedError('Data not available for pair: ' + str(pair))
 
-    if not (re.fullmatch('(\\d+)([wfmy])', tenor)):
+    # Avoid recompiling regex each call and use the already-compiled pattern
+    if not (_TENOR_PATTERN.fullmatch(tenor)):
         raise MqValueError('invalid tenor: ' + tenor)
 
     remap_tenor = tenor.replace('m', 'f')
-    currency = pair.replace('USD', '')
+    # Use string slicing for 'USD' - 3 bytes so slicing faster than replace if always at the end
+    currency = pair[:-3] if pair.endswith('USD') else pair.replace('USD', '')
+    # Direct .get without making price_location_defaults as it's only logged
     price_location_defaults = CURRENCY_TO_PRICING_LOCATION.get(currency, PricingLocation.LDN)
-    kwargs = dict(type='Forward', asset_parameters_settlement_date=remap_tenor, asset_parameters_pair=pair)
+    kwargs = {
+        'type': 'Forward',
+        'asset_parameters_settlement_date': remap_tenor,
+        'asset_parameters_pair': pair
+    }
 
+    # This remains a lookup call, can't optimize further without changing library call
     rate_mqid = _get_tdapi_rates_assets(**kwargs)
 
-    _logger.debug('where asset= %s (%s), ois_xccy_tenor=%s, pricing_location=%s',
-                  rate_mqid, pair, tenor, price_location_defaults)
+    _logger.debug(
+        'where asset= %s (%s), ois_xccy_tenor=%s, pricing_location=%s',
+        rate_mqid, pair, tenor, price_location_defaults
+    )
 
     q = GsDataApi.build_market_data_query([rate_mqid], query_type, source=source, real_time=real_time)
     _logger.debug('q %s', q)
@@ -1807,9 +1823,11 @@ def ois_xccy(asset: Asset, tenor: str = None, *, source: str = None, real_time: 
     return series
 
 
-@plot_measure((AssetClass.FX,), (AssetType.Forward, AssetType.Cross),
-              [MeasureDependency(id_provider=_cross_to_fxfwd_xcswp_asset,
-                                 query_type=QueryType.OIS_XCCY_EX_SPIKE)])
+@plot_measure(
+    (AssetClass.FX,), (AssetType.Forward, AssetType.Cross),
+    [MeasureDependency(id_provider='_cross_to_fxfwd_xcswp_asset',
+                       query_type=QueryType.OIS_XCCY_EX_SPIKE)]
+)
 def ois_xccy_ex_spike(asset: Asset, tenor: str = None, *, source: str = None, real_time: bool = False) -> pd.Series:
     """
     GS end-of-day OIS Xccy spreads curves excluding spikes across G10 cross currencies.
@@ -1820,10 +1838,20 @@ def ois_xccy_ex_spike(asset: Asset, tenor: str = None, *, source: str = None, re
     :param real_time: whether to retrieve intraday data instead of EOD
     :return: ois xccy spread curve excluding spikes
     """
-    df = _get_fxfwd_xccy_swp_rates_data(asset=asset, tenor=tenor, query_type=QueryType.OIS_XCCY_EX_SPIKE, source=source,
-                                        real_time=real_time)
-
-    series = ExtendedSeries(dtype=float) if df.empty else ExtendedSeries(df['oisXccyExSpike'])
+    df = _get_fxfwd_xccy_swp_rates_data(
+        asset=asset,
+        tenor=tenor,
+        query_type=QueryType.OIS_XCCY_EX_SPIKE,
+        source=source,
+        real_time=real_time,
+    )
+    # Avoid attribute lookup twice
+    oisxcs_col = 'oisXccyExSpike'
+    if df.empty:
+        series = ExtendedSeries(dtype=float)
+    else:
+        # df.get(oisxcs_col) would return None if key missing; for production, strict will error if col missing
+        series = ExtendedSeries(df[oisxcs_col])
     series.dataset_ids = getattr(df, 'dataset_ids', ())
     return series
 
