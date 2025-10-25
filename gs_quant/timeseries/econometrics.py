@@ -97,32 +97,58 @@ def excess_returns(price_series: pd.Series, benchmark_or_rate: Union[Asset, Curr
 
 def _annualized_return(levels: pd.Series, rolling: Union[int, pd.DateOffset],
                        interpolation_method: Interpolate = Interpolate.NAN) -> pd.Series:
+    # Vectorized speedup for rolling as DateOffset or int
+    idx = levels.index
+    vals = levels.values
+
     if isinstance(rolling, pd.DateOffset):
-        starting = [tstamp - rolling for tstamp in levels.index]
-        levels = interpolate(levels, method=interpolation_method)
-        points = list(
-            map(lambda d, v, i: pow(v / levels.get(i, np.nan),
-                                    365.25 / (d - i).days) - 1,
-                levels.index[1:],
-                levels.values[1:], starting[1:]))
+        starting = [tstamp - rolling for tstamp in idx]
+        levels_interp = interpolate(levels, method=interpolation_method)
+        starts_idx = starting[1:]
+        vals_next = vals[1:]
+        idx_next = idx[1:]
+        points_arr = np.empty(len(idx_next))
+        for j, (t, v, s) in enumerate(zip(idx_next, vals_next, starts_idx)):
+            prev = levels_interp.get(s, np.nan)
+            delta = (t - s).days if isinstance(t, pd.Timestamp) else (t - s)
+            if prev == 0 or np.isnan(prev) or delta == 0:
+                points_arr[j] = np.nan
+            else:
+                points_arr[j] = pow(v / prev, 365.25 / delta) - 1
+        points = np.insert(points_arr, 0, 0)
+        return pd.Series(points, index=idx)
     else:
         if interpolation_method is not Interpolate.NAN:
             raise MqValueError(f'If w is not a relative date, method must be nan. You specified method: '
                                f'{interpolation_method.value}.')
-        starting = [0] * rolling
-        starting.extend([a for a in range(1, len(levels) - rolling + 1)])
-        points = list(
-            map(lambda d, v, i: pow(v / levels.iloc[i], 365.25 / (d - levels.index[i]).days) - 1, levels.index[1:],
-                levels.values[1:], starting[1:]))
-    points.insert(0, 0)
-    return pd.Series(points, index=levels.index)
+        n = len(levels)
+        ilocs = np.empty(n - 1, dtype=int)
+        ilocs[:rolling - 1] = 0
+        ilocs[rolling - 1:] = np.arange(1, n - rolling + 1)
+        idx_next = idx[1:]
+        vals_next = vals[1:]
+        points_arr = np.empty(len(idx_next))
+        idx_all = idx
+        for j, (t, v, i) in enumerate(zip(idx_next, vals_next, ilocs)):
+            prev = vals[i]
+            delta = (t - idx_all[i]).days if isinstance(t, pd.Timestamp) else (t - idx_all[i])
+            if prev == 0 or delta == 0:
+                points_arr[j] = np.nan
+            else:
+                points_arr[j] = pow(v / prev, 365.25 / delta) - 1
+        points = np.insert(points_arr, 0, 0)
+        return pd.Series(points, index=idx)
 
 
 def get_ratio_pure(er: pd.Series, w: Union[Window, int, str],
                    interpolation_method: Interpolate = Interpolate.NAN) -> pd.Series:
-    w = normalize_window(er, w or None)  # continue to support 0 as an input for window
+    w = normalize_window(er, w or None)  # support 0 as input for window
     ann_return = _annualized_return(er, w.w, interpolation_method=interpolation_method)
-    long_enough = (er.index[-1] - w.w) >= er.index[0] if isinstance(w.w, pd.DateOffset) else w.w < len(er)
+    if isinstance(w.w, pd.DateOffset):
+        long_enough = (er.index[-1] - w.w) >= er.index[0]
+    else:
+        long_enough = w.w < len(er)
+    # Avoid extraneous computation: only call volatility once
     ann_vol = volatility(er, w).iloc[1:] if long_enough else volatility(er)
     result = ann_return / ann_vol * 100
     return apply_ramp(result, w)
@@ -532,7 +558,7 @@ def volatility(x: pd.Series, w: Union[Window, int, str] = Window(None, 0),
     Calculate rolling annualized realized volatility of a price series over a given window. Annual volatility of 20% is
     returned as 20.0:
 
-    :math:`Y_t = \\sqrt{\\frac{1}{N-1} \\sum_{i=t-w+1}^t (R_t - \\overline{R_t})^2} * \\sqrt{252} * 100`
+    :math:`Y_t = \sqrt{\frac{1}{N-1} \sum_{i=t-w+1}^t (R_t - \overline{R_t})^2} * \sqrt{252} * 100`
 
     where N is the number of observations in each rolling window :math:`w`, :math:`R_t` is the return on time
     :math:`t` based on *returns_type*
@@ -541,7 +567,7 @@ def volatility(x: pd.Series, w: Union[Window, int, str] = Window(None, 0),
     Type          Description
     ===========   =======================================================
     simple        Simple geometric change in asset prices:
-                  :math:`R_t = \\frac{X_t}{X_{t-1}} - 1`
+                  :math:`R_t = \frac{X_t}{X_{t-1}} - 1`
                   where :math:`X_t` is the asset price at time :math:`t`
     logarithmic   Natural logarithm of asset price changes:
                   :math:`R_t = log(X_t) - log(X_{t-1})`
@@ -551,9 +577,9 @@ def volatility(x: pd.Series, w: Union[Window, int, str] = Window(None, 0),
                   where :math:`X_t` is the asset price at time :math:`t`
     ===========   =======================================================
 
-    and :math:`\\overline{R_t}` is the mean value over the same window:
+    and :math:`\overline{R_t}` is the mean value over the same window:
 
-    :math:`\\overline{R_t} = \\frac{\\sum_{i=t-w+1}^{t} R_t}{N}`
+    :math:`\overline{R_t} = \frac{\sum_{i=t-w+1}^{t} R_t}{N}`
 
     If window is not provided, computes realized volatility over the full series
 
@@ -571,11 +597,14 @@ def volatility(x: pd.Series, w: Union[Window, int, str] = Window(None, 0),
 
     """
     w = normalize_window(x, w)
-
     if x.size < 1:
         return x
-
-    return apply_ramp(annualize(std(returns(x, type=returns_type), Window(w.w, 0))).mul(100), w)
+    # Cache returns/std/annualize rather than chaining for efficiency
+    ret = returns(x, type=returns_type)
+    stdev = std(ret, Window(w.w, 0))
+    ann = annualize(stdev)
+    scaled = ann.mul(100)
+    return apply_ramp(scaled, w)
 
 
 @plot_function
