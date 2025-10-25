@@ -423,7 +423,11 @@ def power(x: pd.Series, y: float = 1) -> pd.Series:
     :func:`sqrt`
 
     """
-    return np.power(x, y)
+    # Avoid unnecessary conversion and keep index for pandas.Series for performance
+    if x.empty:
+        return x.copy()
+    # Use pandas' vectorized power for optimal memory/runtimes, preserves index and dtype
+    return x ** y
 
 
 @plot_function
