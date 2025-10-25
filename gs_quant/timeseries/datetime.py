@@ -34,24 +34,34 @@ interpolation operations. Includes sampling operations based on daif dates[0]te 
 """
 
 AggregateFunction: Union[Union[type, Enum], Any] = _create_enum(
-    'AggregateFunction',
-    ['max', 'min', 'mean', 'sum', 'first', 'last']
+    "AggregateFunction", ["max", "min", "mean", "sum", "first", "last"]
 )
-AggregatePeriod = _create_enum('AggregatePeriod', ['week', 'month', 'year'])
+AggregatePeriod = _create_enum("AggregatePeriod", ["week", "month", "year"])
 
 
 def __interpolate_step(x: pd.Series, dates: pd.Series = None) -> pd.Series:
     if x.empty:
-        raise MqValueError('Cannot perform step interpolation on an empty series')
+        raise MqValueError("Cannot perform step interpolation on an empty series")
 
-    first_date = pd.Timestamp(dates.index[0]) if isinstance(x.index[0], pd.Timestamp) else dates.index[0]
+    first_date = (
+        pd.Timestamp(dates.index[0])
+        if isinstance(x.index[0], pd.Timestamp)
+        else dates.index[0]
+    )
 
     # locate previous valid date or take first value from series
-    prev = x.index[0] if first_date < x.index[0] else x.index[x.index.get_indexer([first_date], method='pad')]
+    prev = (
+        x.index[0]
+        if first_date < x.index[0]
+        else x.index[x.index.get_indexer([first_date], method="pad")]
+    )
 
     current = x[prev]
 
-    curve = x.align(dates, 'right', )[0]  # only need values from dates
+    curve = x.align(
+        dates,
+        "right",
+    )[0]  # only need values from dates
 
     for knot in curve.items():
         if np.isnan(knot[1]):
@@ -62,8 +72,11 @@ def __interpolate_step(x: pd.Series, dates: pd.Series = None) -> pd.Series:
 
 
 @plot_function
-def align(x: Union[pd.Series, Real], y: Union[pd.Series, Real], method: Interpolate = Interpolate.INTERSECT) -> \
-        Union[List[pd.Series], List[Real]]:
+def align(
+    x: Union[pd.Series, Real],
+    y: Union[pd.Series, Real],
+    method: Interpolate = Interpolate.INTERSECT,
+) -> Union[List[pd.Series], List[Real]]:
     """
     Align dates of two series or scalars
 
@@ -117,28 +130,31 @@ def align(x: Union[pd.Series, Real], y: Union[pd.Series, Real], method: Interpol
         return [x, pd.Series(y, index=x.index)]
 
     if method == Interpolate.INTERSECT:
-        return x.align(y, 'inner')
+        return x.align(y, "inner")
     if method == Interpolate.NAN:
-        return x.align(y, 'outer')
+        return x.align(y, "outer")
     if method == Interpolate.ZERO:
-        return x.align(y, 'outer', fill_value=0)
+        return x.align(y, "outer", fill_value=0)
     if method == Interpolate.TIME:
-        new_x, new_y = x.align(y, 'outer')
-        new_x = new_x.interpolate('time', limit_area='inside')
-        new_y = new_y.interpolate('time', limit_area='inside')
+        new_x, new_y = x.align(y, "outer")
+        new_x = new_x.interpolate("time", limit_area="inside")
+        new_y = new_y.interpolate("time", limit_area="inside")
         return [new_x, new_y]
     if method == Interpolate.STEP:
-        new_x, new_y = x.align(y, 'outer')
+        new_x, new_y = x.align(y, "outer")
         new_x = new_x.ffill().bfill()
         new_y = new_y.ffill().bfill()
         return [new_x, new_y]
     else:
-        raise MqValueError('Unknown intersection type: ' + method)
+        raise MqValueError("Unknown intersection type: " + method)
 
 
 @plot_function
-def interpolate(x: pd.Series, dates: Union[List[dt.date], List[dt.time], pd.Series] = None,
-                method: Interpolate = Interpolate.INTERSECT) -> pd.Series:
+def interpolate(
+    x: pd.Series,
+    dates: Union[List[dt.date], List[dt.time], pd.Series] = None,
+    method: Interpolate = Interpolate.INTERSECT,
+) -> pd.Series:
     """
     Interpolate over specified dates or times
 
@@ -191,20 +207,24 @@ def interpolate(x: pd.Series, dates: Union[List[dt.date], List[dt.time], pd.Seri
         align_series = pd.Series(np.nan, dates)
 
     if method == Interpolate.INTERSECT:
-        return x.align(align_series, 'inner')[0]
+        return x.align(align_series, "inner")[0]
     if method == Interpolate.NAN:
-        return x.align(align_series, 'right')[0]
+        return x.align(align_series, "right")[0]
     if method == Interpolate.ZERO:
-        align_series = pd.Series(0.0, dates)
-        return x.align(align_series, 'right', fill_value=0)[0]
+        align_series = pd.Series(
+            0.0, index=dates if not isinstance(dates, pd.Series) else dates.index
+        )
+        return x.align(align_series, "right", fill_value=0)[0]
     if method == Interpolate.STEP:
         return __interpolate_step(x, align_series)
     else:
-        raise MqValueError('Unknown intersection type: ' + method)
+        raise MqValueError("Unknown intersection type: " + method)
 
 
 @plot_function
-def value(x: pd.Series, date: Union[dt.date, dt.time], method: Interpolate = Interpolate.STEP) -> pd.Series:
+def value(
+    x: pd.Series, date: Union[dt.date, dt.time], method: Interpolate = Interpolate.STEP
+) -> pd.Series:
     """
     Value at specified date or time
 
@@ -408,9 +428,9 @@ def weekday(x: pd.Series) -> pd.Series:
 
 @plot_function
 def day_count_fractions(
-        dates: Union[List[dt.date], pd.Series],
-        convention: DayCountConvention = DayCountConvention.ACTUAL_360,
-        frequency: PaymentFrequency = PaymentFrequency.MONTHLY
+    dates: Union[List[dt.date], pd.Series],
+    convention: DayCountConvention = DayCountConvention.ACTUAL_360,
+    frequency: PaymentFrequency = PaymentFrequency.MONTHLY,
 ) -> pd.Series:
     """
     Day count fractions between dates in series
@@ -456,15 +476,23 @@ def day_count_fractions(
         return pd.Series(dtype=float)
 
     start_dates = date_list[0:-1]
-    end_dates = date_list[1:len(date_list)]
+    end_dates = date_list[1 : len(date_list)]
 
-    dcfs = map(lambda a, b: day_count_fraction(a, b, convention, frequency), start_dates, end_dates)
-    return pd.Series(data=[np.nan] + list(dcfs), index=date_list[0:len(date_list)])
+    dcfs = map(
+        lambda a, b: day_count_fraction(a, b, convention, frequency),
+        start_dates,
+        end_dates,
+    )
+    return pd.Series(data=[np.nan] + list(dcfs), index=date_list[0 : len(date_list)])
 
 
 @plot_function
-def date_range(x: pd.Series, start_date: Union[dt.date, int], end_date: Union[dt.date, int],
-               weekdays_only: bool = False) -> pd.Series:
+def date_range(
+    x: pd.Series,
+    start_date: Union[dt.date, int],
+    end_date: Union[dt.date, int],
+    weekdays_only: bool = False,
+) -> pd.Series:
     """
     Create a time series from a (sub-)range of dates in an existing time series.
 
@@ -498,13 +526,16 @@ def date_range(x: pd.Series, start_date: Union[dt.date, int], end_date: Union[dt
     """
     if not isinstance(weekdays_only, bool):
         raise MqTypeError('expected a boolean value for "weekdays_only"')
-    if not (isinstance(x.index, pd.DatetimeIndex) or all(map(lambda a: isinstance(a, dt.date), x.index.values))):
-        raise MqValueError('input is not a time series')
+    if not (
+        isinstance(x.index, pd.DatetimeIndex)
+        or all(map(lambda a: isinstance(a, dt.date), x.index.values))
+    ):
+        raise MqValueError("input is not a time series")
 
     if isinstance(start_date, int):
         start_date = x.index[start_date]
     if isinstance(end_date, int):
-        end_date = x.index[- (1 + end_date)]
+        end_date = x.index[-(1 + end_date)]
 
     try:
         start_date = start_date.date()
@@ -520,7 +551,9 @@ def date_range(x: pd.Series, start_date: Union[dt.date, int], end_date: Union[dt
     else:
         week_mask = tuple([True] * 7)
 
-    return x.loc[x.index.isin(list(_date_range(start_date, end_date, week_mask=week_mask)))]
+    return x.loc[
+        x.index.isin(list(_date_range(start_date, end_date, week_mask=week_mask)))
+    ]
 
 
 @plot_function
@@ -550,7 +583,7 @@ def append(series: List[pd.Series]) -> pd.Series:
 
     """
     if not len(series):
-        return pd.Series(dtype='float64')
+        return pd.Series(dtype="float64")
     res = series[0].copy()
     for i in range(1, len(series)):
         cur = series[i]
@@ -586,7 +619,7 @@ def prepend(x: List[pd.Series]) -> pd.Series:
     :func:`union`
 
     """
-    res = pd.Series(dtype='float64')
+    res = pd.Series(dtype="float64")
     for i in range(len(x)):
         this = x[i]
         if i == len(x) - 1:
@@ -623,16 +656,18 @@ def union(x: List[pd.Series]) -> pd.Series:
 
     """
     if len(x):
-        res = pd.Series(dtype='float64', index=x[0].index)
+        res = pd.Series(dtype="float64", index=x[0].index)
         for series in x:
             res = res.combine_first(series)
     else:
-        res = pd.Series(dtype='float64')
+        res = pd.Series(dtype="float64")
     return res
 
 
 @plot_function
-def bucketize(series: pd.Series, aggregate_function: AggregateFunction, period: AggregatePeriod) -> pd.Series:
+def bucketize(
+    series: pd.Series, aggregate_function: AggregateFunction, period: AggregatePeriod
+) -> pd.Series:
     """
     Bucketize a series and apply aggregate function to each bucket
 
@@ -680,7 +715,7 @@ def day_count(first: dt.date, second: dt.date) -> int:
     :return: number of business days between first and second
     """
     if not (isinstance(first, dt.date) and isinstance(second, dt.date)):
-        raise MqValueError('inputs must be dates')
+        raise MqValueError("inputs must be dates")
     return np.busday_count(first, second)
 
 
@@ -701,7 +736,16 @@ def align_calendar(series: pd.Series, calendar: str) -> pd.Series:
     >>> align_calendar(x, 'NYC')
     """
     gs_calendar = GsCalendar.get(calendar)
-    cbd = pd.tseries.offsets.CustomBusinessDay(calendar=gs_calendar.business_day_calendar())
+    cbd = pd.tseries.offsets.CustomBusinessDay(
+        calendar=gs_calendar.business_day_calendar()
+    )
     filtered_series = series[
-        series.index.isin(pd.date_range(start=series.first_valid_index(), end=series.last_valid_index(), freq=cbd))]
+        series.index.isin(
+            pd.date_range(
+                start=series.first_valid_index(),
+                end=series.last_valid_index(),
+                freq=cbd,
+            )
+        )
+    ]
     return filtered_series

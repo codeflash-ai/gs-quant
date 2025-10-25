@@ -98,22 +98,33 @@ def excess_returns(price_series: pd.Series, benchmark_or_rate: Union[Asset, Curr
 def _annualized_return(levels: pd.Series, rolling: Union[int, pd.DateOffset],
                        interpolation_method: Interpolate = Interpolate.NAN) -> pd.Series:
     if isinstance(rolling, pd.DateOffset):
-        starting = [tstamp - rolling for tstamp in levels.index]
+        # Use vectorized index subtraction if possible
+        if isinstance(levels.index, pd.DatetimeIndex):
+            starting = (levels.index - rolling).tolist()
+        else:
+            starting = [tstamp - rolling for tstamp in levels.index]
         levels = interpolate(levels, method=interpolation_method)
-        points = list(
-            map(lambda d, v, i: pow(v / levels.get(i, np.nan),
-                                    365.25 / (d - i).days) - 1,
-                levels.index[1:],
-                levels.values[1:], starting[1:]))
+        idx1 = levels.index[1:]
+        val1 = levels.values[1:]
+        start1 = starting[1:]
+        # Use a list comprehension over the zipped iterables instead of map+lambda for speed
+        points = [
+            pow(v / levels.get(i, np.nan), 365.25 / (d - i).days) - 1
+            for d, v, i in zip(idx1, val1, start1)
+        ]
     else:
         if interpolation_method is not Interpolate.NAN:
             raise MqValueError(f'If w is not a relative date, method must be nan. You specified method: '
                                f'{interpolation_method.value}.')
         starting = [0] * rolling
         starting.extend([a for a in range(1, len(levels) - rolling + 1)])
-        points = list(
-            map(lambda d, v, i: pow(v / levels.iloc[i], 365.25 / (d - levels.index[i]).days) - 1, levels.index[1:],
-                levels.values[1:], starting[1:]))
+        idx1 = levels.index[1:]
+        val1 = levels.values[1:]
+        start1 = starting[1:]
+        points = [
+            pow(v / levels.iloc[i], 365.25 / (d - levels.index[i]).days) - 1
+            for d, v, i in zip(idx1, val1, start1)
+        ]
     points.insert(0, 0)
     return pd.Series(points, index=levels.index)
 
