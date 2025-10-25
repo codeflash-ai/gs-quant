@@ -23,7 +23,6 @@ from abc import ABC, ABCMeta, abstractmethod
 from collections import namedtuple
 from dataclasses import Field, InitVar, MISSING, dataclass, field, fields, replace
 from enum import EnumMeta, Enum
-from functools import update_wrapper
 from typing import Iterable, Mapping, Optional, Union, Tuple
 
 import numpy as np
@@ -97,7 +96,11 @@ def handle_camel_case_args(cls):
 
         return init(self, *args, **normalised_kwargs)
 
-    cls.__init__ = update_wrapper(wrapper=wrapper, wrapped=init)
+    wrapper.__name__ = init.__name__
+    wrapper.__doc__ = init.__doc__
+    wrapper.__annotations__ = getattr(init, '__annotations__', {})
+
+    cls.__init__ = wrapper
 
     return cls
 
@@ -512,7 +515,7 @@ class Priceable(Base):
 
         usd_delta_f and eur_delta_f are futures, usd_delta and eur_delta are dataframes
         """
-        raise NotImplementedError
+        raise self._calc_not_implemented_error
 
 
 class __ScenarioMeta(ABCMeta, ContextMeta):
