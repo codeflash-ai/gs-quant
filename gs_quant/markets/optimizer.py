@@ -718,9 +718,11 @@ class FactorConstraint:
         self.__max_exposure = value
 
     def to_dict(self):
+        factor = self.__factor
+        max_exposure = self.__max_exposure
         return {
-            'factor': self.factor.name,
-            'exposure': self.max_exposure
+            'factor': factor.name,
+            'exposure': max_exposure
         }
 
     @classmethod
@@ -780,7 +782,7 @@ class OptimizerUniverse:
                  assets: Union[List[Asset], AssetUniverse] = None,
                  explode_composites: bool = True,
                  exclude_initial_position_set_assets: bool = True,
-                 exclude_corporate_actions_types: List[CorporateActionsTypes] = [],
+                 exclude_corporate_actions_types: List[CorporateActionsTypes] = None,
                  exclude_hard_to_borrow_assets: bool = False,
                  exclude_restricted_assets: bool = False,
                  min_market_cap: float = None,
@@ -798,6 +800,8 @@ class OptimizerUniverse:
         :param max_market_cap: exclude assets above the requested maximum market cap
         specify the identifier type
         """
+        if exclude_corporate_actions_types is None:
+            exclude_corporate_actions_types = []
         self.__assets = assets
         self.__explode_composites = explode_composites
         self.__exclude_initial_position_set_assets = exclude_initial_position_set_assets
@@ -872,27 +876,27 @@ class OptimizerUniverse:
         self.__max_market_cap = value
 
     def to_dict(self):
-        if isinstance(self.assets, AssetUniverse):
-            self.assets.resolve()
-            asset_ids = self.assets.asset_ids
+        if isinstance(self.__assets, AssetUniverse):
+            self.__assets.resolve()
+            asset_ids = self.__assets.asset_ids
         else:
-            asset_ids = [asset.get_marquee_id() for asset in self.assets]
+            asset_ids = [asset.get_marquee_id() for asset in self.__assets]
         as_dict = {
             'hedgeUniverse': {
                 'assetIds': asset_ids,
                 'assetTypes': []
             },
-            'excludeCorporateActions': len(self.exclude_corporate_actions_types) != 0,
-            'excludeCorporateActionsTypes': [x.value for x in self.exclude_corporate_actions_types],
-            'excludeHardToBorrowAssets': self.exclude_hard_to_borrow_assets,
-            'excludeRestrictedAssets': self.exclude_restricted_assets,
-            'excludeTargetAssets': self.exclude_initial_position_set_assets,
-            'explodeUniverse': self.explode_composites,
+            'excludeCorporateActions': len(self.__exclude_corporate_actions_types) != 0,
+            'excludeCorporateActionsTypes': [x.value for x in self.__exclude_corporate_actions_types],
+            'excludeHardToBorrowAssets': self.__exclude_hard_to_borrow_assets,
+            'excludeRestrictedAssets': self.__exclude_restricted_assets,
+            'excludeTargetAssets': self.__exclude_initial_position_set_assets,
+            'explodeUniverse': self.__explode_composites,
         }
-        if self.min_market_cap:
-            as_dict['minMarketCap'] = self.min_market_cap
-        if self.max_market_cap:
-            as_dict['maxMarketCap'] = self.max_market_cap
+        if self.__min_market_cap:
+            as_dict['minMarketCap'] = self.__min_market_cap
+        if self.__max_market_cap:
+            as_dict['maxMarketCap'] = self.__max_market_cap
         return as_dict
 
 
