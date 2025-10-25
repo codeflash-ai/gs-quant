@@ -25,11 +25,16 @@ from gs_quant.common import RiskMeasure, ParameterisedRiskMeasure
 from gs_quant import common
 from gs_quant import risk
 
+_RISK_ATTRS = {attr for attr in dir(risk)}
+
+_RISK_OBJECTS = {attr: getattr(risk, attr) for attr in _RISK_ATTRS}
+
 
 def gsq_rm_for_name(name: str) -> Optional[RiskMeasure]:
-    if name is None or name not in dir(risk):
+    # Replace repeated dir(risk) with set membership lookup and precomputed dict
+    if name is None or name not in _RISK_OBJECTS:
         return None
-    return getattr(risk, name)
+    return _RISK_OBJECTS[name]
 
 
 def encode_risk_measure(rm: RiskMeasure) -> Dict:
@@ -54,9 +59,6 @@ def _decode_param(data: dict) -> Optional[RiskMeasureParameter]:
 
 
 def _decode_gsq_risk_measure(data: dict) -> Optional[RiskMeasure]:
-    def _enum_or_str_equal(a: Optional[Union[Enum, str]], b: Optional[Union[Enum, str]]):
-        return (a is None and b is None) or (str(a).lower() == str(b).lower())
-
     name = data.get('name', None)
     gsq_rm = gsq_rm_for_name(name)
     if gsq_rm is None:
@@ -86,3 +88,7 @@ def decode_risk_measure(data: Dict) -> RiskMeasure:
 
 def decode_risk_measure_tuple(blob: Tuple[Dict, ...]) -> Tuple[RiskMeasure, ...]:
     return tuple(decode_risk_measure(s) for s in blob) if isinstance(blob, (tuple, list)) else None
+
+def _enum_or_str_equal(a: Optional[Union[Enum, str]], b: Optional[Union[Enum, str]]):
+    # Hoisted out of main function for performance and to avoid repeated function definition
+    return (a is None and b is None) or (str(a).lower() == str(b).lower())
