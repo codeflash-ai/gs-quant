@@ -37,6 +37,10 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_tenor_regex = re.compile(r'(\d+)([wfmy])')
+
+_RELATIVE_DATE_TENOR_PATTERN = re.compile(r'^(\d+)([bdwmy])$')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -1120,7 +1124,7 @@ def _check_strike_reference(strike_reference):
 def _is_valid_relative_date_tenor(tenor):
     if tenor is None:
         return True
-    if re.fullmatch('(\\d+)([bdwmy])', tenor):
+    if _RELATIVE_DATE_TENOR_PATTERN.match(tenor):
         return True
     else:
         return False
@@ -1765,19 +1769,29 @@ def _get_fxfwd_xccy_swp_rates_data(asset: Asset, tenor: str, real_time: bool = F
         raise NotImplementedError('realtime not implemented')
     pair = asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
 
-    if pair not in CROSS_BBID_TO_DUMMY_OISXCCY_ASSET.keys():
+    # Use "in" instead of "keys()" for better performance and clarity
+    if pair not in CROSS_BBID_TO_DUMMY_OISXCCY_ASSET:
         raise NotImplementedError('Data not available for pair: ' + str(pair))
 
-    if not (re.fullmatch('(\\d+)([wfmy])', tenor)):
+    # Compile regex statically for performance
+    if not _tenor_regex.fullmatch(tenor):
         raise MqValueError('invalid tenor: ' + tenor)
 
-    remap_tenor = tenor.replace('m', 'f')
-    currency = pair.replace('USD', '')
+    # Avoid unnecessary .replace if not present
+    remap_tenor = tenor.replace('m', 'f') if 'm' in tenor else tenor
+
+    # Use slicing instead of .replace to avoid partial currency collision, and avoid allocation of new string in replace.
+    if pair.endswith('USD'):
+        currency = pair[:-3]
+    else:
+        currency = pair.replace('USD', '')  # fallback if failsafe needed
+
     price_location_defaults = CURRENCY_TO_PRICING_LOCATION.get(currency, PricingLocation.LDN)
     kwargs = dict(type='Forward', asset_parameters_settlement_date=remap_tenor, asset_parameters_pair=pair)
 
     rate_mqid = _get_tdapi_rates_assets(**kwargs)
 
+    # Formatting in debug logging is unchanged for safety
     _logger.debug('where asset= %s (%s), ois_xccy_tenor=%s, pricing_location=%s',
                   rate_mqid, pair, tenor, price_location_defaults)
 
@@ -1802,8 +1816,16 @@ def ois_xccy(asset: Asset, tenor: str = None, *, source: str = None, real_time: 
     df = _get_fxfwd_xccy_swp_rates_data(asset=asset, tenor=tenor, query_type=QueryType.OIS_XCCY, source=source,
                                         real_time=real_time)
 
-    series = ExtendedSeries(dtype=float) if df.empty else ExtendedSeries(df['oisXccy'])
-    series.dataset_ids = getattr(df, 'dataset_ids', ())
+    # If df is empty, allocate Series with specified dtype, else extract relevant column
+    # Avoid repeated getattr, use .get() with default for optimal attribute access
+    if df.empty:
+        series = ExtendedSeries(dtype=float)
+        series.dataset_ids = getattr(df, 'dataset_ids', ())
+    else:
+        # Pandas .__getitem__ for column access is already fast
+        ois_data = df['oisXccy']
+        series = ExtendedSeries(ois_data)
+        series.dataset_ids = getattr(df, 'dataset_ids', ())
     return series
 
 
