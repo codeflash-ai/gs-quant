@@ -37,6 +37,8 @@ from gs_quant.timeseries.measures import _market_data_timed, _range_from_pricing
     _get_custom_bd, ExtendedSeries, SwaptionTenorType, _extract_series_from_df, GENERIC_DATE, \
     _asset_from_spec, ASSET_SPEC, MeasureDependency, _logger
 
+_RELATIVE_DATE_TENOR_PATTERN = re.compile(r'^(\d+)([bdwmy])$')
+
 
 # TODO: Use gs_quant object
 class _ClearingHouse(Enum):
@@ -1120,7 +1122,7 @@ def _check_strike_reference(strike_reference):
 def _is_valid_relative_date_tenor(tenor):
     if tenor is None:
         return True
-    if re.fullmatch('(\\d+)([bdwmy])', tenor):
+    if _RELATIVE_DATE_TENOR_PATTERN.match(tenor):
         return True
     else:
         return False
@@ -1765,7 +1767,7 @@ def _get_fxfwd_xccy_swp_rates_data(asset: Asset, tenor: str, real_time: bool = F
         raise NotImplementedError('realtime not implemented')
     pair = asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
 
-    if pair not in CROSS_BBID_TO_DUMMY_OISXCCY_ASSET.keys():
+    if pair not in CROSS_BBID_TO_DUMMY_OISXCCY_ASSET:
         raise NotImplementedError('Data not available for pair: ' + str(pair))
 
     if not (re.fullmatch('(\\d+)([wfmy])', tenor)):
@@ -1843,7 +1845,13 @@ def non_usd_ois(asset: Asset, tenor: str = None, *, source: str = None, real_tim
     df = _get_fxfwd_xccy_swp_rates_data(asset=asset, tenor=tenor, query_type=QueryType.NON_USD_OIS, source=source,
                                         real_time=real_time)
 
-    series = ExtendedSeries(dtype=float) if df.empty else ExtendedSeries(df['nonUsdOis'])
+    # Fast path for empty DataFrame: avoid column lookup if .empty
+    if df.empty:
+        series = ExtendedSeries(dtype=float)
+    else:
+        # No changes here: series construction relies on ExtendedSeries contract
+        series = ExtendedSeries(df['nonUsdOis'])
+    # getattr fallback is optimal; no changes
     series.dataset_ids = getattr(df, 'dataset_ids', ())
     return series
 
