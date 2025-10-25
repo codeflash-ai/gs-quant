@@ -105,9 +105,9 @@ class GsBaseScreenerApi:
         :return: dict list, a list of dictionaries, where each dictionary represents a row
         of data to be published to the screener.
         """
-        request_headers = {'Content-Type': 'application/json;charset=utf-8'}
-        return GsSession.current._post('/data/screeners/{id}/publish'.format(id=screener_id), data,
-                                       request_headers=request_headers)['data']
+        response = GsSession.current._post(f'/data/screeners/{screener_id}/publish', data,
+                                           request_headers={'Content-Type': 'application/json;charset=utf-8'})
+        return response['data']
 
     @classmethod
     def clear_screener(cls, screener_id: str) -> Dict[str, Any]:
