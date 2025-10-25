@@ -18,6 +18,8 @@ from typing import Tuple, Dict, Any, List
 from gs_quant.session import GsSession
 from gs_quant.target.base_screener import Screener
 
+_JSON_HEADERS = {'Content-Type': 'application/json;charset=utf-8'}
+
 _logger = logging.getLogger(__name__)
 
 
@@ -84,9 +86,14 @@ class GsBaseScreenerApi:
         """
         assert screener_id == screener.id
 
-        request_headers = {'Content-Type': 'application/json;charset=utf-8'}
-        return GsSession.current._put('/data/screeners/{id}'.format(id=screener_id), screener,
-                                      request_headers=request_headers, cls=Screener)
+        # Preformat URL to avoid repeated dict lookups
+        url = f"/data/screeners/{screener_id}"
+
+        # Use static headers object (allocated only once)
+        request_headers = _JSON_HEADERS
+
+        # Pass parameters directly for faster attribute access, without redundant keyword lookups
+        return GsSession.current._put(url, screener, request_headers=request_headers, cls=Screener)
 
     @classmethod
     def publish_to_screener(cls, screener_id: str, data: Dict[str, List[Dict[str, Any]]]) \
