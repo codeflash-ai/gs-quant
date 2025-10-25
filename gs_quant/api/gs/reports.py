@@ -137,7 +137,9 @@ class GsReportApi:
 
     @classmethod
     def cancel_report_job(cls, report_job_id: str) -> dict:
-        return GsSession.current._post('/reports/jobs/{report_job_id}/cancel'.format(report_job_id=report_job_id))
+        # Pre-format the endpoint string to avoid str.format overhead at runtime
+        endpoint = f'/reports/jobs/{report_job_id}/cancel'
+        return GsSession.current._post(endpoint)
 
     @classmethod
     def update_report_job(cls, report_job_id: str, status: str) -> dict:
