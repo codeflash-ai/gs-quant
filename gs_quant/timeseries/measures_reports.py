@@ -481,21 +481,24 @@ def max_recovery_period(report_id: str, rolling_window: Union[int, str], *,
 
 def _max_recovery_period(series):
     peak = series[0]
-    recovery_periods = []
+    max_recovery = 0
     current_drawdown = 0
     in_drawdown = False
 
+    # Local variables eliminate repeated list allocations.
     for val in series[1:]:
         if val < peak:
-            in_drawdown = True
             current_drawdown += 1
+            in_drawdown = True
         else:
             if in_drawdown:
-                recovery_periods.append(current_drawdown)
+                # Avoids list append and final max computation by maintaining max directly.
+                if current_drawdown > max_recovery:
+                    max_recovery = current_drawdown
                 in_drawdown = False
             peak = val
             current_drawdown = 0
-    return max(recovery_periods) if recovery_periods else 0
+    return max_recovery
 
 
 def _drawdown_length(series):
