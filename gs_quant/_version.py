@@ -1,4 +1,3 @@
-
 # This file helps to compute a version number in source trees obtained from
 # git-archive tarball (such as those provided by githubs download-from-tag
 # feature). Distribution tarballs (built by setup.py sdist) and build
@@ -59,13 +58,15 @@ LONG_VERSION_PY: Dict[str, str] = {}
 HANDLERS: Dict[str, Dict[str, Callable]] = {}
 
 
-def register_vcs_handler(vcs, method):  # decorator
+def register_vcs_handler(vcs, method):
     """Create decorator to mark a method as the handler of a VCS."""
     def decorate(f):
         """Store f in HANDLERS[vcs][method]."""
-        if vcs not in HANDLERS:
-            HANDLERS[vcs] = {}
-        HANDLERS[vcs][method] = f
+        handlers_for_vcs = HANDLERS.get(vcs)
+        if handlers_for_vcs is None:
+            handlers_for_vcs = {}
+            HANDLERS[vcs] = handlers_for_vcs
+        handlers_for_vcs[method] = f
         return f
     return decorate
 
