@@ -94,22 +94,30 @@ DictDayRule = {
 
 def relative_date_add(date_rule: str, strict: bool = False) -> float:
     """Change the string in date rule format to the number of days. E.g 1d to 1, 1y to 365, 1m to 30, -1w to -7"""
-    days = ''
+    # Compile the regex once for reuse, which speeds up repeated calls
+    # But as module-level DateRuleReg is used frequently, we can safely cache the compiled version on the first call.
+    # However, since DateRuleReg is always the same, we compile it once here.
+    _compiled_rule_re = getattr(relative_date_add, "_compiled_rule_re", None)
+    if _compiled_rule_re is None:
+        _compiled_rule_re = re.compile(r"^([-]*[0-9]+[mydwbfMYDWBFM])+$")
+        relative_date_add._compiled_rule_re = _compiled_rule_re
 
-    if re.search(DateRuleReg, date_rule) is not None:
-        res = re.search(DateRuleReg, date_rule)
-        date_str = res.group(1)
+    # Use compiled regex for both match and extract
+    match = _compiled_rule_re.match(date_rule)
+    if match is not None:
+        date_str = match.group(1)
+        # Avoid unnecessary string concatenation and conversion
         if date_str[0] == '-':
             num = float(date_str[1:-1])
-            days = '-'
+            scale_sign = -1
         else:
             num = float(date_str[:-1])
+            scale_sign = 1
         rule = date_str[-1:]
         if rule in DictDayRule:
             scale = DictDayRule[rule]
-            days = days + str(num * scale)
-            d = float(days)
-            return d
+            # Calculate and return directly, without str + float roundtrip
+            return num * scale * scale_sign
         else:
             raise MqValueError('There are no valid day rule for the point provided.')
 
