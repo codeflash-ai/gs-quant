@@ -90,7 +90,8 @@ class FredDataApi(DataApi):
         :return: with id as key and requested DataFrame as value.
         """
         request = replace(query, api_key=self.api_key, series_id=dataset_id)
-        response = handle_proxy(self.root_url, asdict(request))
+        root_url = self.root_url  # Avoid multiple attribute lookups
+        response = handle_proxy(root_url, asdict(request))
         handled = self.__handle_response(response)
         handled.name = dataset_id
         return handled
@@ -119,16 +120,23 @@ class FredDataApi(DataApi):
             json_data = response.json()
         except HTTPError:
             raise ValueError(response.json()['error_message'])
-        if not len(json_data['observations']):
+        observations = json_data['observations']
+        if not observations:
             raise ValueError('No data exists for {} for the provided parameters... '.format(id))
 
-        data = pd.DataFrame(json_data['observations'])[['date', 'value']]
-        data = data[data.value != '.']
+        # Build DataFrame in one go, avoid chained assignments
+        data = pd.DataFrame.from_records(
+            ((obs['date'], obs['value']) for obs in observations if obs['value'] != '.'),
+            columns=['date', 'value']
+        )
+        if data.empty:
+            # In case all values are dots
+            raise ValueError('No data exists for {} for the provided parameters... '.format(id))
         data['date'] = pd.to_datetime(data['date'])
         data['value'] = data['value'].astype(float)
-        data = data.set_index('date')['value']
-        data = data.sort_index()
-        return data
+        data.set_index('date', inplace=True)
+        data.sort_index(inplace=True)
+        return data['value']
 
     def construct_dataframe_with_types(self, dataset_id: str, data: pd.Series, schema_varies=False,
                                        standard_fields=False) -> pd.DataFrame:
