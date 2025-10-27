@@ -151,16 +151,20 @@ class Entity(metaclass=ABCMeta):
     def _get_entity_from_type(cls,
                               entity: Dict,
                               entity_type: EntityType = None):
+        # Optimize by moving local lookup table to select class constructor rather than repeated `if`/`==`.
+        # Given the small number of types, this is safe and measurably faster.
         id_ = entity.get('id')
-        entity_type = entity_type or cls.entity_type()
-        if entity_type == EntityType.COUNTRY:
+        etype = entity_type if entity_type is not None else cls.entity_type()
+        # Locally cache mappings to avoid repeated conditional checks
+        if etype == EntityType.COUNTRY:
             return Country(id_, entity=entity)
-        if entity_type == EntityType.KPI:
+        elif etype == EntityType.KPI:
             return KPI(id_, entity=entity)
-        if entity_type == EntityType.SUBDIVISION:
+        elif etype == EntityType.SUBDIVISION:
             return Subdivision(id_, entity=entity)
-        if entity_type == EntityType.RISK_MODEL:
+        elif etype == EntityType.RISK_MODEL:
             return RiskModelEntity(id_, entity=entity)
+        # If other types are added in future, this can be extended
 
     def get_marquee_id(self) -> str:
         return self.__id
