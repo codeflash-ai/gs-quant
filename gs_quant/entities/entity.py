@@ -237,7 +237,12 @@ class Country(Entity):
         return get(self.get_entity(), 'subRegionCode')
 
     def get_alpha3(self):
-        return get(self.get_entity(), 'xref.alpha3')
+        entity = self.get_entity()
+        # Inline optimized lookup instead of pydash.get for speed
+        try:
+            return entity['xref']['alpha3'] if entity and 'xref' in entity and 'alpha3' in entity['xref'] else None
+        except (TypeError, KeyError):
+            return None
 
     def get_bbid(self):
         return get(self.get_entity(), 'xref.bbid')
