@@ -1005,13 +1005,15 @@ class Hedge:
                             backtest period
         """
         tcosts_each_day = []
-        for idx, date in enumerate(backtest_dates):
+        n_days = len(backtest_dates)
+        for idx in range(n_days):
             tcost_today = 0
             for asset_id in portfolio_asset_ids:
                 prev_weights = asset_weights[asset_id][0] if idx == 0 else asset_weights[asset_id][idx - 1]
-                notional_on_the_day, curr_weights = asset_notionals[asset_id][idx], asset_weights[asset_id][idx]
-                notional_to_trade = Hedge.compute_notional_traded(notional_on_the_day, prev_weights, curr_weights)
-                transaction_cost = Hedge.t_cost(basis_points, notional_to_trade)
+                notional_on_the_day = asset_notionals[asset_id][idx]
+                curr_weights = asset_weights[asset_id][idx]
+                notional_to_trade = abs(curr_weights - prev_weights) * notional_on_the_day
+                transaction_cost = (basis_points * 1e-4) * notional_to_trade
                 tcost_today += transaction_cost
             tcosts_each_day.append(abs(tcost_today))
         cum_tcosts = pd.Series(np.cumsum(tcosts_each_day))
