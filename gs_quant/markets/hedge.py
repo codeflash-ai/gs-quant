@@ -683,10 +683,11 @@ class Hedge:
     A Marquee hedge.
     """
 
-    def __init__(self,
-                 parameters,
-                 objective: HedgeObjective
-                 ):
+    def __init__(
+        self,
+        parameters,
+        objective: HedgeObjective
+    ):
         self.__parameters = parameters
         self.__objective = objective
         self.__result = {}
@@ -812,10 +813,19 @@ class Hedge:
 
     @staticmethod
     def format_dictionary_key_to_readable_format(renamed_results):
+        # Optimize string construction and avoid lambda/map by using a single pass with a list of characters
         formatted_results = {}
-        for inner_key in renamed_results:
-            formatted_results[inner_key[0].capitalize() + ''.join(map(lambda x: x if x.islower() else f' {x}',
-                                                                      inner_key[1:]))] = renamed_results[inner_key]
+        for k, v in renamed_results.items():
+            # Use list comprehension for efficient character iteration, only join once
+            formatted_key_chars = [k[0].upper()]
+            for c in k[1:]:
+                if c.islower():
+                    formatted_key_chars.append(c)
+                else:
+                    formatted_key_chars.append(' ')
+                    formatted_key_chars.append(c)
+            formatted_key = ''.join(formatted_key_chars)
+            formatted_results[formatted_key] = v
         return formatted_results
 
     @staticmethod
