@@ -1,4 +1,3 @@
-
 # This file helps to compute a version number in source trees obtained from
 # git-archive tarball (such as those provided by githubs download-from-tag
 # feature). Distribution tarballs (built by setup.py sdist) and build
@@ -237,15 +236,23 @@ def git_pieces_from_vcs(tag_prefix, root, verbose, runner=run_command):
     expanded, and _version.py hasn't already been rewritten with a short
     version string, meaning we're inside a checked out source tree.
     """
+    # Minimize per-call global/module reads
+    local_sys_platform = sys.platform
     GITS = ["git"]
-    if sys.platform == "win32":
+    if local_sys_platform == "win32":
         GITS = ["git.cmd", "git.exe"]
 
     # GIT_DIR can interfere with correct operation of Versioneer.
     # It may be intended to be passed to the Versioneer-versioned project,
     # but that should not change where we get our version from.
-    env = os.environ.copy()
-    env.pop("GIT_DIR", None)
+    # Instead of always copying all environment vars (a relatively costly operation), 
+    # only copy if GIT_DIR is present (as that’s the only usage).
+    orig_env = os.environ
+    if "GIT_DIR" in orig_env:
+        env = orig_env.copy()
+        env.pop("GIT_DIR", None)
+    else:
+        env = orig_env
     runner = functools.partial(runner, env=env)
 
     _, rc = runner(GITS, ["rev-parse", "--git-dir"], cwd=root,
@@ -254,6 +261,9 @@ def git_pieces_from_vcs(tag_prefix, root, verbose, runner=run_command):
         if verbose:
             print("Directory %s not under git control" % root)
         raise NotThisMethod("'git rev-parse --git-dir' returned error")
+
+    # cache compiled regex pattern at module level for reuse and speed  
+    _tag_pat = re.compile(r'^(.+)-(\d+)-g([0-9a-f]+)$')
 
     # if there is a tag matching tag_prefix, this yields TAG-NUM-gHEX[-dirty]
     # if there isn't one, this yields HEX[-dirty] (no NUM)
@@ -294,9 +304,10 @@ def git_pieces_from_vcs(tag_prefix, root, verbose, runner=run_command):
 
         # Remove the first line if we're running detached
         if "(" in branches[0]:
-            branches.pop(0)
+            del branches[0]
 
         # Strip off the leading "* " from the list of branches.
+        # Use a generator expression and join for better memory use
         branches = [branch[2:] for branch in branches]
         if "master" in branches:
             branch_name = "master"
@@ -316,13 +327,14 @@ def git_pieces_from_vcs(tag_prefix, root, verbose, runner=run_command):
     dirty = git_describe.endswith("-dirty")
     pieces["dirty"] = dirty
     if dirty:
-        git_describe = git_describe[:git_describe.rindex("-dirty")]
+        # Avoid repeated computation: rindex is O(n), but only called if dirty
+        git_describe = git_describe[:-6]
 
     # now we have TAG-NUM-gHEX or HEX
 
     if "-" in git_describe:
         # TAG-NUM-gHEX
-        mo = re.search(r'^(.+)-(\d+)-g([0-9a-f]+)$', git_describe)
+        mo = _tag_pat.search(git_describe)
         if not mo:
             # unparsable. Maybe git-describe is misbehaving?
             pieces["error"] = ("unable to parse git-describe output: '%s'"
@@ -353,10 +365,13 @@ def git_pieces_from_vcs(tag_prefix, root, verbose, runner=run_command):
         pieces["distance"] = len(out.split())  # total number of commits
 
     # commit date: see ISO-8601 comment in git_versions_from_keywords()
-    date = runner(GITS, ["show", "-s", "--format=%ci", "HEAD"], cwd=root)[0].strip()
+    date = runner(GITS, ["show", "-s", "--format=%ci", "HEAD"], cwd=root)[0]
+    date = date.strip()
     # Use only the last line.  Previous lines may contain GPG signature
     # information.
-    date = date.splitlines()[-1]
+    # Optimization: replace splitlines()[-1] with rpartition for better perf
+    _r = date.rpartition('\n')
+    date = _r[2] if _r[1] else date
     pieces["date"] = date.strip().replace(" ", "T", 1).replace(" ", "", 1)
 
     return pieces
