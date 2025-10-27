@@ -17,7 +17,7 @@ import logging
 import re
 from collections import namedtuple
 from enum import Enum, auto
-from functools import partial
+from functools import lru_cache, partial
 from numbers import Real
 from typing import Union, Optional, Tuple, List
 
@@ -51,6 +51,8 @@ from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions
                                         check_forward_looking, get_dataset_with_many_assets, get_df_with_retries,
                                         log_return, plot_measure)
 from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
+
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
 
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
@@ -327,8 +329,12 @@ _COMMOD_CONTRACT_MONTH_CODES_DICT = {k: v for k, v in enumerate(_COMMOD_CONTRACT
 
 
 def _asset_from_spec(asset_spec: ASSET_SPEC) -> Asset:
-    return asset_spec if isinstance(asset_spec, Asset) else SecurityMaster.get_asset(asset_spec,
-                                                                                     AssetIdentifier.MARQUEE_ID)
+    # LRU cache for string lookups (MARQUEE_ID), otherwise direct pass-through to avoid mutating or caching objects
+    if isinstance(asset_spec, Asset):
+        return asset_spec
+    if isinstance(asset_spec, str) or isinstance(asset_spec, int):
+        return _memoized_asset_from_spec(asset_spec)
+    return SecurityMaster.get_asset(asset_spec, AssetIdentifier.MARQUEE_ID)
 
 
 def _cross_stored_direction_helper(bbid):
@@ -418,33 +424,38 @@ def cross_to_basis(asset_spec: ASSET_SPEC) -> str:
 
 
 def convert_asset_for_rates_data_set(from_asset: Asset, c_type: RatesConversionType) -> str:
-    try:
-        bbid = from_asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
-        if bbid is None:
-            return from_asset.get_marquee_id()
+    import logging
+    bbid = from_asset.get_identifier(AssetIdentifier.BLOOMBERG_ID)
+    if bbid is None:
+        return from_asset.get_marquee_id()
 
-        if c_type is RatesConversionType.DEFAULT_BENCHMARK_RATE:
-            to_asset = CURRENCY_TO_DEFAULT_RATE_BENCHMARK[bbid]
-        elif c_type is RatesConversionType.DEFAULT_SWAP_RATE_ASSET:
-            to_asset = (bbid + '-3m') if bbid == "USD" else (bbid + '-6m') if bbid in ['GBP', 'EUR', 'CHF', 'SEK'] \
-                else bbid
-        elif c_type is RatesConversionType.INFLATION_BENCHMARK_RATE:
-            to_asset = CURRENCY_TO_INFLATION_RATE_BENCHMARK[bbid]
-        elif c_type is RatesConversionType.OIS_BENCHMARK_RATE:
-            to_asset = CURRENCY_TO_OIS_RATE_BENCHMARK[bbid]
+    # Avoid KeyErrors by early .get lookup, decreasing cost of exceptions
+    if c_type is RatesConversionType.DEFAULT_BENCHMARK_RATE:
+        to_asset = CURRENCY_TO_DEFAULT_RATE_BENCHMARK.get(bbid)
+    elif c_type is RatesConversionType.DEFAULT_SWAP_RATE_ASSET:
+        if bbid == "USD":
+            to_asset = bbid + '-3m'
+        elif bbid in ['GBP', 'EUR', 'CHF', 'SEK']:
+            to_asset = bbid + '-6m'
         else:
-            to_asset = CROSS_TO_CROSS_CURRENCY_BASIS[bbid]
+            to_asset = bbid
+    elif c_type is RatesConversionType.INFLATION_BENCHMARK_RATE:
+        to_asset = CURRENCY_TO_INFLATION_RATE_BENCHMARK.get(bbid)
+    elif c_type is RatesConversionType.OIS_BENCHMARK_RATE:
+        to_asset = CURRENCY_TO_OIS_RATE_BENCHMARK.get(bbid)
+    else:
+        to_asset = CROSS_TO_CROSS_CURRENCY_BASIS.get(bbid)
 
-        identifiers = GsAssetApi.map_identifiers(GsIdType.mdapi, GsIdType.id, [to_asset])
-        if to_asset in identifiers:
-            return identifiers[to_asset]
-        if None in identifiers:
-            return identifiers[None]
-        raise MqValueError('Unable to map identifier.')
-
-    except KeyError:
+    if to_asset is None:
         logging.info('Unsupported currency or cross')
         return from_asset.get_marquee_id()
+
+    identifiers = GsAssetApi.map_identifiers(GsIdType.mdapi, GsIdType.id, [to_asset])
+    if to_asset in identifiers:
+        return identifiers[to_asset]
+    if None in identifiers:
+        return identifiers[None]
+    raise MqValueError('Unable to map identifier.')
 
 
 def _get_custom_bd(exchange):
@@ -863,11 +874,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
@@ -5056,3 +5067,9 @@ def s3_long_short_concentration(asset: Asset, s3Metric: S3Metrics = S3Metrics.LO
 
     # Extract the timeseries and format it for PTP
     return _extract_series_from_df(df, QueryType.S3_AGGREGATE_DATA)
+
+
+@lru_cache(maxsize=128)
+def _memoized_asset_from_spec(asset_spec: Union[str, int]) -> Asset:
+    # Only memoize for string/int lookups so object Asset and non-hashables are excluded.
+    return SecurityMaster.get_asset(asset_spec, AssetIdentifier.MARQUEE_ID)
