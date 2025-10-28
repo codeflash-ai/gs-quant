@@ -25,6 +25,7 @@ from .algebra import subtract
 from .helper import Window, plot_function, normalize_window, apply_ramp
 from .statistics import mean, std, exponential_std
 from ..errors import MqValueError
+import numpy as np
 
 """
 Technicals library is for technical analysis functions on timeseries, including moving averages,
@@ -153,7 +154,7 @@ def smoothed_moving_average(x: pd.Series, w: Union[Window, int, str] = Window(No
 
     A modified moving average (MMA), running moving average (RMA), or smoothed moving average (SMMA) is defined as:
 
-    :math:`P_{MM,today} = \\frac{(N-1)P_{MM,yesterday} + P_today}{N}`
+    :math:`P_{MM,today} = \frac{(N-1)P_{MM,yesterday} + P_today}{N}`
 
     where N is the number of observations in each rolling window, :math:`w`. If window is not provided, computes
     rolling mean over the full series
@@ -184,16 +185,34 @@ def smoothed_moving_average(x: pd.Series, w: Union[Window, int, str] = Window(No
     if (isinstance(ramp, int) and ramp > 0) or isinstance(ramp, pd.DateOffset):
         x = apply_ramp(x, w)
 
-    smoothed_moving_averages = x.copy()
-    smoothed_moving_averages *= 0
-    smoothed_moving_averages.iloc[0] = initial_moving_average
-    for i in range(1, len(x)):
-        if isinstance(window_size, int):
-            window_num_elem = window_size
-        else:
-            window_num_elem = len(x[(x.index > (x.index[i] - window_size).date()) & (x.index <= x.index[i])])
-        smoothed_moving_averages.iloc[i] = ((window_num_elem - 1) *
-                                            smoothed_moving_averages.iloc[i - 1] + x.iloc[i]) / window_num_elem
+    # Use numpy arrays for faster assignment, especially in the loop
+    smoothed_moving_averages_arr = np.zeros(len(x), dtype=float)
+    smoothed_moving_averages_arr[0] = initial_moving_average
+    x_vals = x.values
+
+    # For non-integer window, cache offsets to avoid repeated filtering
+    # Only compute mask indices (date-offset logic) once per possible unique offset
+    if not isinstance(window_size, int):
+        idx_arr = x.index
+        offset_cache = {}
+        for i in range(1, len(x)):
+            offset_val = (idx_arr[i] - window_size).date()
+            mask_key = (offset_val, idx_arr[i])
+            # Cache the result for repeated offsets
+            if mask_key not in offset_cache:
+                offset_cache[mask_key] = np.count_nonzero(
+                    (idx_arr > offset_val) & (idx_arr <= idx_arr[i])
+                )
+            window_num_elem = offset_cache[mask_key]
+            prev_val = smoothed_moving_averages_arr[i - 1]
+            smoothed_moving_averages_arr[i] = ((window_num_elem - 1) * prev_val + x_vals[i]) / window_num_elem
+    else:
+        window_num_elem = window_size  # constant for int window
+        for i in range(1, len(x)):
+            prev_val = smoothed_moving_averages_arr[i - 1]
+            smoothed_moving_averages_arr[i] = ((window_num_elem - 1) * prev_val + x_vals[i]) / window_num_elem
+
+    smoothed_moving_averages = pd.Series(smoothed_moving_averages_arr, index=x.index)
     return smoothed_moving_averages
 
 
@@ -228,26 +247,27 @@ def relative_strength_index(x: pd.Series, w: Union[Window, int, str] = 14) -> pd
     """
     w = normalize_window(x, w)
     one_period_change = diff(x, 1)[1:]
-    gains = one_period_change.copy()
-    losses = one_period_change.copy()
-    gains[gains < 0] = 0
-    losses[losses > 0] = 0
-    losses[losses < 0] *= -1
 
-    moving_avg_gains = smoothed_moving_average(gains, w)
-    moving_avg_losses = smoothed_moving_average(losses, w)
+    gains = np.where(one_period_change.values < 0, 0, one_period_change.values)
+    losses = np.where(one_period_change.values > 0, 0, -one_period_change.values)
 
-    rsi_len = len(moving_avg_gains)
-    rsi = moving_avg_gains.copy()
-    rsi *= 0
+    moving_avg_gains = smoothed_moving_average(pd.Series(gains, index=one_period_change.index), w)
+    moving_avg_losses = smoothed_moving_average(pd.Series(losses, index=one_period_change.index), w)
 
-    for index in range(0, rsi_len):
-        if moving_avg_losses.iloc[index] == 0:
-            rsi.iloc[index] = 100
-        else:
-            relative_strength = moving_avg_gains.iloc[index] / moving_avg_losses.iloc[index]
-            rsi.iloc[index] = 100 - (100 / (1 + relative_strength))
+    # Use numpy logic for vectorized RSI calculation
+    len_rsi = len(moving_avg_gains)
+    rsi_arr = np.zeros(len_rsi, dtype=float)
+    mag_vals = moving_avg_gains.values
+    mal_vals = moving_avg_losses.values
+    with np.errstate(divide='ignore', invalid='ignore'):
+        mask_zero = mal_vals == 0
+        rsi_arr[mask_zero] = 100
+        mask_nonzero = ~mask_zero
+        relative_strength = np.zeros(len_rsi, dtype=float)
+        relative_strength[mask_nonzero] = mag_vals[mask_nonzero] / mal_vals[mask_nonzero]
+        rsi_arr[mask_nonzero] = 100 - (100 / (1 + relative_strength[mask_nonzero]))
 
+    rsi = pd.Series(rsi_arr, index=moving_avg_gains.index)
     return rsi
 
 
