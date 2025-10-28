@@ -174,57 +174,72 @@ def build_exposure_df(notional_df: pd.DataFrame,
                       factor_data: pd.DataFrame,
                       by_name: bool) -> pd.DataFrame:
     # Multiply sensitivity with notional
-    columns = universe_sensitivities_df.columns.values.tolist()
+    columns = universe_sensitivities_df.columns.values
+    notional_values = notional_df['Notional'].values
     universe_sensitivities_df /= 100
-    for column in columns:
-        universe_sensitivities_df[column] = universe_sensitivities_df[column] * notional_df['Notional']
+    # Vectorized multiplication using DataFrame.values for speed
+    universe_sensitivities_df.loc[:, columns] = universe_sensitivities_df[columns].values * notional_values[:, None]
 
     if factor_data.empty:
         if factor_categories:
             categories_names = [f.name for f in factor_categories] if by_name else [f.id for f in factor_categories]
             universe_sensitivities_df = universe_sensitivities_df[categories_names]
 
-        universe_sensitivities_df = pd.concat([universe_sensitivities_df,
-                                               universe_sensitivities_df.agg("sum").to_frame().rename(
-                                                   columns={0: "Total Factor Category Exposure"}).T])
+        total_row = universe_sensitivities_df.agg("sum")
+        total_row.name = "Total Factor Category Exposure"
+        universe_sensitivities_df = pd.concat([
+            universe_sensitivities_df,
+            total_row.to_frame().T
+        ])
 
         universe_sensitivities_df = universe_sensitivities_df.sort_values(
             by="Total Factor Category Exposure", axis=1, ascending=False)
-        notional_df = pd.concat(
-            [notional_df,
-             notional_df[["Notional"]].agg("sum").to_frame().rename(
-                 columns={0: "Total Factor Category Exposure"}).T])
+        notional_sum_row = notional_df[["Notional"]].agg("sum")
+        notional_sum_row.name = "Total Factor Category Exposure"
+        notional_df = pd.concat([
+            notional_df,
+            notional_sum_row.to_frame().T
+        ])
 
         exposure_df = notional_df.join(universe_sensitivities_df).rename_axis("Factor Category", axis=1)
     else:
-        factor_data = factor_data.set_index("name") if by_name else factor_data.set_index("identifier")
-        new_columns = [(factor_data.loc[f, 'factorCategory'], f) for f in universe_sensitivities_df.columns.values] \
-            if by_name else [(factor_data.loc[f, 'factorCategoryId'], f) for f in
-                             universe_sensitivities_df.columns.values]
+        idx_col = "name" if by_name else "identifier"
+        # Avoid unnecessary df copy - use inplace set_index
+        factor_data_indexed = factor_data.set_index(idx_col, drop=False)
+        columns_values = universe_sensitivities_df.columns.values
+        # Faster lookup using .loc and map
+        cat_col = "factorCategory" if by_name else "factorCategoryId"
+        categories = factor_data_indexed.loc[columns_values, cat_col].values
+        new_columns = list(zip(categories, columns_values))
         universe_sensitivities_df = (
             universe_sensitivities_df.set_axis(pd.MultiIndex.from_tuples(new_columns), axis=1)
             .rename_axis(("Factor Category", "Factor"), axis=1)
         )
-        universe_sensitivities_df = pd.concat([universe_sensitivities_df,
-                                               universe_sensitivities_df.agg("sum").to_frame().rename(
-                                                   columns={0: "Total Factor Exposure"}).T
-                                               ])
+        total_row = universe_sensitivities_df.agg("sum")
+        total_row.name = "Total Factor Exposure"
+        universe_sensitivities_df = pd.concat([
+            universe_sensitivities_df,
+            total_row.to_frame().T
+        ])
         universe_sensitivities_df = universe_sensitivities_df.sort_values(
             by=["Total Factor Exposure"], axis=1, ascending=False)
 
         # Only return factors that are grouped in the factor categories that we passed; if empty return all factors
         if factor_categories:
             categories_names = [f.name for f in factor_categories] if by_name else [f.id for f in factor_categories]
-            universe_sensitivities_df = universe_sensitivities_df[categories_names]
+            # Slice using .loc for MultiIndex speed/path
+            universe_sensitivities_df = universe_sensitivities_df.loc[:, categories_names]
 
-        notional_df = (
-            pd.concat([
-                notional_df,
-                notional_df[["Notional"]].agg("sum").to_frame().rename(columns={0: "Total Factor Exposure"}).T
-            ]).set_axis(pd.MultiIndex.from_tuples(
-                [("Asset Information", "Asset Name"), ("Asset Information", "Notional")]), axis=1)
-        )
-        # Merge universe sensitivity with notional df
+        notional_sum_row = notional_df[["Notional"]].agg("sum")
+        notional_sum_row.name = "Total Factor Exposure"
+        notional_df = pd.concat([
+            notional_df,
+            notional_sum_row.to_frame().T
+        ])
+
+        notional_df = notional_df.set_axis(pd.MultiIndex.from_tuples(
+            [("Asset Information", "Asset Name"), ("Asset Information", "Notional")]), axis=1)
+
         exposure_df = notional_df.join(universe_sensitivities_df).rename_axis(("Factor Category", "Factor"), axis=1)
 
     return exposure_df
