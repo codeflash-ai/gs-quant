@@ -375,6 +375,7 @@ class TenorParser(object):
 
     def __init__(self, expiry: str):
         self.expiry = expiry
+        self._regex = re.compile(self.expiry_regex)
 
     def get_date(self):
         parts = re.search(self.expiry_regex, self.expiry)
@@ -384,7 +385,7 @@ class TenorParser(object):
             return self.expiry
 
     def get_mode(self):
-        parts = re.search(self.expiry_regex, self.expiry)
+        parts = self._regex.search(self.expiry)
         if parts:
             return parts.group(2)
         else:
