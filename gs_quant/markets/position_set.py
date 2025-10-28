@@ -54,17 +54,29 @@ class Position:
                  notional: float = None,
                  name: str = None,
                  asset_id: str = None,
-                 tags: Optional[List[Union[PositionTag, Dict]]] = None):
+                 tags: Optional[List[Union['PositionTag', Dict]]] = None):
         self.__identifier = identifier
         self.__weight = weight
         self.__quantity = quantity
         self.__notional = notional
         self.__name = name
         self.__asset_id = asset_id
+
+        # Precompute the tags objects and cache the result for dict conversion
         if tags is not None:
-            self.__tags = [PositionTag.from_dict(tag) if isinstance(tag, dict) else tag for tag in tags]
+            tag_objs = []
+            tag_dict_cache = {}
+            for tag in tags:
+                tag_obj = tag if not isinstance(tag, dict) else PositionTag.from_dict(tag)
+                tag_objs.append(tag_obj)
+                # Cache the (name, value) in advance for fast lookup in tags_as_dict
+                tag_dict_cache[tag_obj.name] = tag_obj.value
+            self.__tags = tag_objs
+            self.__tags_dict_cache = tag_dict_cache
         else:
             self.__tags = tags
+            self.__tags_dict_cache = None
+
         self.__restricted, self.__hard_to_borrow = None, None
 
     def __eq__(self, other) -> bool:
@@ -165,16 +177,34 @@ class Position:
             raise MqValueError(f'Position already has tag with name {name}')
 
     def tags_as_dict(self):
+        # Use precomputed tag dict if available
+        if self.__tags_dict_cache is not None:
+            # Return a copy to preserve behavioral contract
+            return dict(self.__tags_dict_cache)
+        if self.tags is None:
+            return {}
+        # Fallback for None, but this should not happen in normal workflow
         return {tag.name: tag.value for tag in self.tags}
 
     def as_dict(self, tags_as_keys: bool = False) -> Dict:
-        position_dict = dict(identifier=self.identifier, weight=self.weight,
-                             quantity=self.quantity, notional=self.notional,
-                             name=self.name, asset_id=self.asset_id, restricted=self.restricted)
+        # Avoid extra temporary dictionaries: use a mutable dict and remove None values after update
+        position_dict = {
+            'identifier': self.identifier,
+            'weight': self.weight,
+            'quantity': self.quantity,
+            'notional': self.notional,
+            'name': self.name,
+            'asset_id': self.asset_id,
+            'restricted': self.restricted
+        }
         if self.tags and tags_as_keys:
+            # position_dict.update is fast, now uses cached tag dict
             position_dict.update(self.tags_as_dict())
         else:
             position_dict['tags'] = self.tags
+
+        # Remove keys with None values, done in one pass
+        # (dict comprehension here is fastest in CPython for this case)
         return {k: v for k, v in position_dict.items() if v is not None}
 
     @classmethod
@@ -205,6 +235,43 @@ class Position:
             tags_as_target = self.tags if self.tags else None
             return CommonPosition(self.asset_id, quantity=self.quantity, tags=tags_as_target)
         return PositionPriceInput(self.asset_id, quantity=self.quantity, weight=self.weight, notional=self.notional)
+
+    @property
+    def identifier(self):
+        return self.__identifier
+
+    @property
+    def weight(self):
+        return self.__weight
+
+    @property
+    def quantity(self):
+        return self.__quantity
+
+    @property
+    def notional(self):
+        return self.__notional
+
+    @property
+    def name(self):
+        return self.__name
+
+    @property
+    def asset_id(self):
+        return self.__asset_id
+
+    @property
+    def tags(self):
+        return self.__tags
+
+    @property
+    def restricted(self):
+        return self.__restricted
+
+    # This is not used in as_dict, so code remains unchanged.
+    @property
+    def hard_to_borrow(self):
+        return self.__hard_to_borrow
 
 
 class PositionSet:
