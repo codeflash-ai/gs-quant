@@ -426,48 +426,63 @@ def _freq_to_period(x: pd.Series, freq: Frequency = Frequency.YEAR):
     """
     if not isinstance(x.index, pd.DatetimeIndex):
         raise MqValueError("Series must have a pandas.DateTimeIndex.")
+
     pfreq = getattr(getattr(x, 'index', None), 'inferred_freq', None)
     # Some older versions of statsmodels don't handle some of the newer pandas frequencies, so we manually adjust them
     pfreq = 'MS' if pfreq in ('ME', 'M') else pfreq  # Convert Month[End] into MonthlyStart
     pfreq = 'QS' if pfreq in ('QE-DEC', 'QE') else pfreq  # Convert Quarter[End] into QuarterlyStart
     period = None if pfreq is None else statsmodels.tsa.seasonal.freq_to_period(pfreq)
+
+    # Use local lookups for frequency values to speed up comparison
+    f_YEAR = getattr(freq, 'YEAR', 'YEAR')
+    f_QUARTER = getattr(freq, 'QUARTER', 'QUARTER')
+    f_MONTH = getattr(freq, 'MONTH', 'MONTH')
+    f_WEEKLY = getattr(freq, 'WEEKLY', 'WEEKLY')
+
+    # fast string comparison (if .value attribute exists use it, since it's enum)
+    freq_value = getattr(freq, 'value', freq)
+
+    # Grouped as immediate returns for fast dispatch
     if period in [7, None]:  # daily
         x = x.asfreq('D', method='ffill')
-        if freq == Frequency.YEAR:
+        if freq_value == f_YEAR:
             return x, 365
-        elif freq == Frequency.QUARTER:
+        elif freq_value == f_QUARTER:
             return x, 91
-        elif freq == Frequency.MONTH:
+        elif freq_value == f_MONTH:
             return x, 30
         else:
             return x, 7
     elif period == 5:  # business day
-        if freq == Frequency.YEAR:
-            return x.asfreq('D', method='ffill'), 365
-        if freq == Frequency.QUARTER:
-            return x.asfreq('D', method='ffill'), 91
-        elif freq == Frequency.MONTH:
-            return x.asfreq('D', method='ffill'), 30
+        # Use asfreq('D') for everything except true week
+        asfreq_val = 'B' if freq_value == f_WEEKLY else 'D'
+        x = x.asfreq(asfreq_val, method='ffill')
+        if freq_value == f_YEAR:
+            return x, 365
+        elif freq_value == f_QUARTER:
+            return x, 91
+        elif freq_value == f_MONTH:
+            return x, 30
         else:  # freq == Frequency.WEEKLY:
-            return x.asfreq('B', method='ffill'), 5
+            return x, 5
     elif period == 52:  # weekly frequency
         x = x.asfreq('W', method='ffill')
-        if freq == Frequency.YEAR:
+        if freq_value == f_YEAR:
             return x, period
-        elif freq == Frequency.QUARTER:
+        elif freq_value == f_QUARTER:
             return x, 13
-        elif freq == Frequency.MONTH:
+        elif freq_value == f_MONTH:
             return x, 4
         else:
-            raise MqValueError(f'Frequency {freq.value} not compatible with series with frequency {pfreq}.')
+            raise MqValueError(f'Frequency {freq_value} not compatible with series with frequency {pfreq}.')
     elif period == 12:  # monthly frequency
         x = x.asfreq('ME', method='ffill')
-        if freq == Frequency.YEAR:
+        if freq_value == f_YEAR:
             return x, period
-        elif freq == Frequency.QUARTER:
+        elif freq_value == f_QUARTER:
             return x, 3
         else:
-            raise MqValueError(f'Frequency {freq.value} not compatible with series with frequency {pfreq}.')
+            raise MqValueError(f'Frequency {freq_value} not compatible with series with frequency {pfreq}.')
     return x, period
 
 
