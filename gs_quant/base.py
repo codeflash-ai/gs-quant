@@ -13,6 +13,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 """
+
 import builtins
 import copy
 import datetime as dt
@@ -32,9 +33,22 @@ from dataclasses_json.core import _decode_generic, _is_supported_generic
 from inflection import camelize, underscore
 
 from gs_quant.context_base import ContextBase, ContextMeta
-from gs_quant.json_convertors import encode_date_or_str, decode_date_or_str, decode_optional_date, encode_datetime, \
-    decode_datetime, decode_float_or_str, decode_instrument, encode_dictable, decode_quote_report, decode_quote_reports, \
-    decode_custom_comment, decode_custom_comments, decode_optional_time, encode_optional_time
+from gs_quant.json_convertors import (
+    encode_date_or_str,
+    decode_date_or_str,
+    decode_optional_date,
+    encode_datetime,
+    decode_datetime,
+    decode_float_or_str,
+    decode_instrument,
+    encode_dictable,
+    decode_quote_report,
+    decode_quote_reports,
+    decode_custom_comment,
+    decode_custom_comments,
+    decode_optional_time,
+    encode_optional_time,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -88,7 +102,9 @@ def handle_camel_case_args(cls):
             if not arg.isupper():
                 snake_case_arg = _get_underscore(arg)
                 if snake_case_arg != arg and snake_case_arg in kwargs:
-                    raise ValueError('{} and {} both specified'.format(arg, snake_case_arg))
+                    raise ValueError(
+                        "{} and {} both specified".format(arg, snake_case_arg)
+                    )
 
                 arg = snake_case_arg
 
@@ -110,23 +126,46 @@ field_metadata = config(exclude=exclude_none)
 name_metadata = config(exclude=exclude_always)
 
 
-class RiskKey(namedtuple('RiskKey', ('provider', 'date', 'market', 'params', 'scenario', 'risk_measure'))):
-
+class RiskKey(
+    namedtuple(
+        "RiskKey", ("provider", "date", "market", "params", "scenario", "risk_measure")
+    )
+):
     @property
     def ex_measure(self):
         from gs_quant.target.common import RiskRequestParameters  # noqa
-        return RiskKey(self.provider, self.date, self.market,
-                       RiskRequestParameters(self.params.csa_term, self.params.raw_results, False,
-                                             self.params.market_behaviour),
-                       self.scenario, None)
+
+        return RiskKey(
+            self.provider,
+            self.date,
+            self.market,
+            RiskRequestParameters(
+                self.params.csa_term,
+                self.params.raw_results,
+                False,
+                self.params.market_behaviour,
+            ),
+            self.scenario,
+            None,
+        )
 
     @property
     def ex_historical_diddle(self):
         from gs_quant.target.common import RiskRequestParameters  # noqa
-        return RiskKey(self.provider, self.date, self.market,
-                       RiskRequestParameters(self.params.csa_term, self.params.raw_results, False,
-                                             self.params.market_behaviour),
-                       self.scenario, self.risk_measure)
+
+        return RiskKey(
+            self.provider,
+            self.date,
+            self.market,
+            RiskRequestParameters(
+                self.params.csa_term,
+                self.params.raw_results,
+                False,
+                self.params.market_behaviour,
+            ),
+            self.scenario,
+            self.risk_measure,
+        )
 
     @property
     def fields(self):
@@ -134,12 +173,14 @@ class RiskKey(namedtuple('RiskKey', ('provider', 'date', 'market', 'params', 'sc
 
 
 class EnumBase:
-
     @classmethod
     def _missing_(cls: EnumMeta, key):
         if not isinstance(key, str):
             key = str(key)
-        return next((m for m in cls.__members__.values() if m.value.lower() == key.lower()), None)
+        return next(
+            (m for m in cls.__members__.values() if m.value.lower() == key.lower()),
+            None,
+        )
 
     def __reduce_ex__(self, protocol):
         return self.__class__, (self.value,)
@@ -155,7 +196,6 @@ class EnumBase:
 
 
 class HashableDict(dict):
-
     @staticmethod
     def hashables(in_dict) -> Tuple:
         hashables = []
@@ -175,19 +215,31 @@ class DictBase(HashableDict):
 
     def __init__(self, *args, **kwargs):
         if self._PROPERTIES:
-            invalid_arg = next((k for k in kwargs.keys() if k not in self._PROPERTIES), None)
+            invalid_arg = next(
+                (k for k in kwargs.keys() if k not in self._PROPERTIES), None
+            )
             if invalid_arg is not None:
-                raise AttributeError(f"'{self.__class__.__name__}' has no attribute '{invalid_arg}'")
+                raise AttributeError(
+                    f"'{self.__class__.__name__}' has no attribute '{invalid_arg}'"
+                )
 
-        super().__init__(*args, **{camelize(k, uppercase_first_letter=False): v for k, v in kwargs.items()
-                                   if v is not None})
+        super().__init__(
+            *args,
+            **{
+                camelize(k, uppercase_first_letter=False): v
+                for k, v in kwargs.items()
+                if v is not None
+            },
+        )
 
     def __getitem__(self, item):
         return super().__getitem__(camelize(item, uppercase_first_letter=False))
 
     def __setitem__(self, key, value):
         if value is not None:
-            return super().__setitem__(camelize(key, uppercase_first_letter=False), value)
+            return super().__setitem__(
+                camelize(key, uppercase_first_letter=False), value
+            )
 
     def __getattr__(self, item):
         if self._PROPERTIES:
@@ -202,7 +254,9 @@ class DictBase(HashableDict):
         if key in dir(self):
             return super().__setattr__(key, value)
         elif self._PROPERTIES and _get_underscore(key) not in self._PROPERTIES:
-            raise AttributeError(f"'{self.__class__.__name__}' has no attribute '{key}'")
+            raise AttributeError(
+                f"'{self.__class__.__name__}' has no attribute '{key}'"
+            )
 
         self[key] = value
 
@@ -218,14 +272,14 @@ class Base(ABC):
     __field_mappings = None
 
     def __getattr__(self, item):
-        fields_by_name = __getattribute__(self, '_fields_by_name')()
+        fields_by_name = __getattribute__(self, "_fields_by_name")()
 
-        if item.startswith('_') or item in fields_by_name:
+        if item.startswith("_") or item in fields_by_name:
             return __getattribute__(self, item)
 
         # Handle setting via camelCase names (legacy behaviour) and field mappings from disallowed names
         snake_case_item = _get_underscore(item)
-        field_mappings = __getattribute__(self, '_field_mappings')()
+        field_mappings = __getattribute__(self, "_field_mappings")()
         snake_case_item = field_mappings.get(snake_case_item, snake_case_item)
 
         try:
@@ -241,7 +295,7 @@ class Base(ABC):
 
         if fld:
             if not fld.init:
-                raise ValueError(f'{key} cannot be set')
+                raise ValueError(f"{key} cannot be set")
 
             key = snake_case_key
             value = self.__coerce_value(fld.type, value)
@@ -250,7 +304,7 @@ class Base(ABC):
 
     def __repr__(self):
         if self.name is not None:
-            return f'{self.name} ({self.__class__.__name__})'
+            return f"{self.name} ({self.__class__.__name__})"
 
         return super().__repr__()
 
@@ -258,9 +312,11 @@ class Base(ABC):
     def __is_type_match(cls, tp, val):
         if sys.version_info >= (3, 9):
             from types import GenericAlias
+
             is_generic_alias = isinstance(tp, (typing._GenericAlias, GenericAlias))
             if sys.version_info >= (3, 10) and not is_generic_alias:
                 from types import UnionType
+
                 if isinstance(tp, UnionType):
                     return any(cls.__is_type_match(arg, val) for arg in tp.__args__)
         else:
@@ -269,7 +325,7 @@ class Base(ABC):
             # Do not convert Enums to strings
             is_enum_to_str = isinstance(val, Enum) and tp is str
             return isinstance(tp, type) and (isinstance(val, tp) or is_enum_to_str)
-        if getattr(tp, '_special', False):
+        if getattr(tp, "_special", False):
             return False
         origin = tp.__origin__
         args = tp.__args__
@@ -283,7 +339,9 @@ class Base(ABC):
             if len(args) == 1 or args[1] == Ellipsis:
                 return all(cls.__is_type_match(args[0], x) for x in val)
             else:
-                return len(args) == len(val) and all(cls.__is_type_match(arg, x) for arg, x in zip(args, val))
+                return len(args) == len(val) and all(
+                    cls.__is_type_match(arg, x) for arg, x in zip(args, val)
+                )
         return False
 
     @classmethod
@@ -293,7 +351,7 @@ class Base(ABC):
         if isinstance(value, np.generic):
             # Handle numpy types
             return value.item()
-        elif hasattr(value, 'tolist'):
+        elif hasattr(value, "tolist"):
             # tolist converts scalar or array to native python type if not already native.
             return value.tolist()
         elif typ in (DictBase, Optional[DictBase]) and isinstance(value, Base):
@@ -322,9 +380,9 @@ class Base(ABC):
         if cls.__field_mappings is None:
             field_mappings = {}
             for fld in fields(cls):
-                config_fn = fld.metadata.get('dataclasses_json', {}).get('letter_case')
+                config_fn = fld.metadata.get("dataclasses_json", {}).get("letter_case")
                 if config_fn:
-                    mapped_name = config_fn('field_name')
+                    mapped_name = config_fn("field_name")
                     if mapped_name:
                         field_mappings[mapped_name] = fld.name
 
@@ -333,30 +391,34 @@ class Base(ABC):
 
     def clone(self, **kwargs):
         """
-            Clone this object, overriding specified values
+        Clone this object, overriding specified values
 
-            :param kwargs: property names and values, e.g. swap.clone(fixed_rate=0.01)
+        :param kwargs: property names and values, e.g. swap.clone(fixed_rate=0.01)
 
-            **Examples**
+        **Examples**
 
-            To change the market data location of the default context:
+        To change the market data location of the default context:
 
-            >>> from gs_quant.instrument import IRCap
-            >>> cap = IRCap('5y', 'GBP')
-            >>>
-            >>> new_cap = cap.clone(cap_rate=0.01)
+        >>> from gs_quant.instrument import IRCap
+        >>> cap = IRCap('5y', 'GBP')
+        >>>
+        >>> new_cap = cap.clone(cap_rate=0.01)
         """
         return replace(self, **kwargs)
 
     @classmethod
     def properties(cls) -> set:
         """The public property names of this class"""
-        return set(f[:-1] if f[-1] == '_' else f for f in cls._fields_by_name().keys())
+        return {f[:-1] if f[-1] == "_" else f for f in cls._fields_by_name().keys()}
 
     @classmethod
     def properties_init(cls) -> set:
         """The public property names of this class"""
-        return set(f[:-1] if f[-1] == '_' else f for f, v in cls._fields_by_name().items() if v.init)
+        return set(
+            f[:-1] if f[-1] == "_" else f
+            for f, v in cls._fields_by_name().items()
+            if v.init
+        )
 
     def as_dict(self, as_camel_case: bool = False) -> dict:
         """Dictionary of the public, non-null properties and values"""
@@ -384,7 +446,11 @@ class Base(ABC):
         """
         Construct a default instance of this type
         """
-        required = {f.name: None if f.default == MISSING else f.default for f in fields(cls) if f.init}
+        required = {
+            f.name: None if f.default == MISSING else f.default
+            for f in fields(cls)
+            if f.init
+        }
         return cls(**required)
 
     def from_instance(self, instance):
@@ -394,7 +460,9 @@ class Base(ABC):
         :return:
         """
         if not isinstance(instance, type(self)):
-            raise ValueError('Can only use from_instance with an object of the same type')
+            raise ValueError(
+                "Can only use from_instance with an object of the same type"
+            )
 
         for fld in fields(self.__class__):
             if fld.init:
@@ -404,7 +472,6 @@ class Base(ABC):
 @dataclass_json
 @dataclass
 class Priceable(Base):
-
     def resolve(self, in_place: bool = True):
         """
         Resolve non-supplied properties of an instrument
@@ -512,7 +579,7 @@ class Priceable(Base):
 
         usd_delta_f and eur_delta_f are futures, usd_delta and eur_delta are dataframes
         """
-        raise NotImplementedError
+        raise self._calc_not_implemented_error
 
 
 class __ScenarioMeta(ABCMeta, ContextMeta):
@@ -532,9 +599,13 @@ class Scenario(Base, ContextBase, ABC, metaclass=__ScenarioMeta):
         else:
             params = self.as_dict()
             sorted_keys = sorted(params.keys(), key=lambda x: x.lower())
-            params = ', '.join(
-                [f'{k}:{params[k].__repr__ if isinstance(params[k], Base) else params[k]}' for k in sorted_keys])
-            return self.scenario_type + '(' + params + ')'
+            params = ", ".join(
+                [
+                    f"{k}:{params[k].__repr__ if isinstance(params[k], Base) else params[k]}"
+                    for k in sorted_keys
+                ]
+            )
+            return self.scenario_type + "(" + params + ")"
 
 
 @dataclass
@@ -558,8 +629,7 @@ class InstrumentBase(Base, ABC):
 
     @property
     @abstractmethod
-    def provider(self):
-        ...
+    def provider(self): ...
 
     @property
     def instrument_quantity(self) -> float:
@@ -615,7 +685,6 @@ class InstrumentBase(Base, ABC):
 
 @dataclass
 class Market(ABC):
-
     def __hash__(self):
         return hash(self.market or self.location)
 
@@ -627,20 +696,17 @@ class Market(ABC):
 
     @property
     @abstractmethod
-    def market(self):
-        ...
+    def market(self): ...
 
     @property
     @abstractmethod
-    def location(self):
-        ...
+    def location(self): ...
 
     def to_dict(self):
         return self.market.to_dict()
 
 
 class Sentinel:
-
     def __init__(self, name: str):
         self.__name = name
 
@@ -668,7 +734,11 @@ def get_enum_value(enum_type: EnumMeta, value: Union[EnumBase, str]):
     try:
         enum_value = enum_type(value)
     except ValueError:
-        _logger.warning('Setting value to {}, which is not a valid entry in {}'.format(value, enum_type))
+        _logger.warning(
+            "Setting value to {}, which is not a valid entry in {}".format(
+                value, enum_type
+            )
+        )
         enum_value = value
 
     return enum_value
