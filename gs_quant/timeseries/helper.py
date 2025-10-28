@@ -33,6 +33,16 @@ from gs_quant.entities.entity import EntityType
 from gs_quant.errors import MqValueError, MqRequestError
 from gs_quant.timeseries.measure_registry import register_measure
 
+_TO_OFFSET_REGEX = re.compile(r'(\d+)([hdwmy])')
+
+_TO_OFFSET_MAP = {
+    'h': 'hours',
+    'd': 'days',
+    'w': 'weeks',
+    'm': 'months',
+    'y': 'years'
+}
+
 ENABLE_DISPLAY_NAME = 'GSQ_ENABLE_MEASURE_DISPLAY_NAME'
 USE_DISPLAY_NAME = os.environ.get(ENABLE_DISPLAY_NAME) == "1"
 _logger = logging.getLogger(__name__)
@@ -64,21 +74,15 @@ def _create_int_enum(name, mappings):
 
 
 def _to_offset(tenor: str) -> pd.DateOffset:
-    import re
-    matcher = re.fullmatch('(\\d+)([hdwmy])', tenor)
+    matcher = _TO_OFFSET_REGEX.fullmatch(tenor)
     if not matcher:
         raise MqValueError('invalid tenor ' + tenor)
 
     ab = matcher.group(2)
-    if ab == 'h':
-        name = 'hours'
-    elif ab == 'd':
-        name = 'days'
-    elif ab == 'w':
-        name = 'weeks'
-    elif ab == 'm':
-        name = 'months'
-    else:
+    # Use dict lookup directly
+    name = _TO_OFFSET_MAP.get(ab)
+    if name is None:
+        # Only possible if ab is invalid, but assert preserved for behavioral preservation
         assert ab == 'y'
         name = 'years'
 
@@ -141,7 +145,8 @@ class Window:
 
 
 def _check_window(series_length: int, window: Window):
-    if series_length > 0 and isinstance(window.w, int) and isinstance(window.r, int):
+    # Remove isinstance() chaining, use type() is for quick type checks
+    if series_length > 0 and type(window.w) is int and type(window.r) is int:
         if window.w <= 0:
             raise MqValueError('Window value must be greater than zero.')
         if window.r > series_length or window.r < 0:
@@ -166,20 +171,25 @@ def normalize_window(x: Union[pd.Series, pd.DataFrame], window: Union[Window, in
     if default_window is None:
         default_window = len(x)
 
+    # Fast-path short-circuit instead of nesting
     if isinstance(window, int):
         window = Window(window, window)
     elif isinstance(window, str):
-        window = Window(_to_offset(window), _to_offset(window))
+        _offset = _to_offset(window)
+        window = Window(_offset, _offset)
     else:
         if window is None:
             window = Window(default_window, 0)
         else:
-            if isinstance(window.w, str):
-                window = Window(_to_offset(window.w), window.r)
-            if isinstance(window.r, str):
-                window = Window(window.w, _to_offset(window.r))
-            if window.w is None:
-                window = Window(default_window, window.r)
+            w, r = window.w, window.r
+            # Avoid multiple Window() calls, apply all needed transformations before constructing
+            if isinstance(w, str):
+                w = _to_offset(w)
+            if isinstance(r, str):
+                r = _to_offset(r)
+            if w is None:
+                w = default_window
+            window = Window(w, r)
 
     _check_window(default_window, window)
     return window
