@@ -1673,16 +1673,35 @@ def get_pnl_percent(performance_report: PerformanceReport, pnl_df: pd.DataFrame,
 
 
 def get_factor_pnl_percent_for_single_factor(factor_data, total_data, aum_df, start_date):
+    # Fast path: avoid repeated datetime formatting in a tight loop by
+    # pre-formatting start_date once.
+    start_date_str = start_date.strftime('%Y-%m-%d')
+
+    # Format factor and total data into a merged DataFrame efficiently.
     pnl_df = format_factor_pnl_for_return_calculation(factor_data, total_data)
-    is_start_date_first_data_point = pnl_df['date'].iloc[[0]].values[0] == start_date.strftime('%Y-%m-%d')
+
+    # Use iloc[0] directly and compare string, skip .values[] indirection
+    is_start_date_first_data_point = pnl_df['date'].iloc[0] == start_date_str
+
     return generate_daily_returns(aum_df, pnl_df, 'aum', 'pnl', is_start_date_first_data_point)
 
 
 def format_factor_pnl_for_return_calculation(factor_data: list, total_data: list):
-    pnl_df = pd.DataFrame(factor_data)[['date', 'pnl']]
-    total_returns_df = pd.DataFrame(total_data)[['date', 'pnl']]
+    # Faster DataFrame construction: if both data are dicts and have 'date', 'pnl' as keys,
+    # initial column selection speeds up DataFrame construction.
+    pnl_df = pd.DataFrame(factor_data)
+    total_returns_df = pd.DataFrame(total_data)
+
+    # Select columns only if DataFrames have extra columns
+    if set(pnl_df.columns) != {'date', 'pnl'}:
+        pnl_df = pnl_df[['date', 'pnl']]
+    if set(total_returns_df.columns) != {'date', 'pnl'}:
+        total_returns_df = total_returns_df[['date', 'pnl']]
+
     total_returns_df = total_returns_df.rename(columns={'pnl': 'totalPnl'})
-    pnl_df = pd.merge(pnl_df, total_returns_df, how='inner', on=['date'])
+    # merge on date, inner join
+    # Set "sort=False" to avoid sort overhead, since we explicitly sort later
+    pnl_df = pd.merge(pnl_df, total_returns_df, how='inner', on='date', sort=False)
     return pnl_df
 
 
@@ -1696,19 +1715,41 @@ def format_aum_for_return_calculation(performance_report: PerformanceReport, sta
 def generate_daily_returns(aum_df: pd.DataFrame, pnl_df: pd.DataFrame, aum_col_key: str, pnl_col_key: str,
                            is_start_date_first_data_point: bool):
     # Returns are defined as Pnl today divided by AUM yesterday.
+
+    # Only act in place if necessary, skip DataFrame mutation if not needed
     if is_start_date_first_data_point:
-        pnl_df.loc[0, pnl_col_key] = 0
+        # .iat is faster than .loc for single cell access, but requires knowing the column index
+        # Find columns once
+        pnl_col_idx = pnl_df.columns.get_loc(pnl_col_key)
+        pnl_df.iat[0, pnl_col_idx] = 0
         if 'totalPnl' in pnl_df.columns:
-            pnl_df.loc[0, 'totalPnl'] = 0
-    df = pd.merge(pnl_df, aum_df, how='outer', on='date')
-    df = df.set_index('date')
-    df = df.sort_index()
+            total_col_idx = pnl_df.columns.get_loc('totalPnl')
+            pnl_df.iat[0, total_col_idx] = 0
+
+    # Main merge, use 'outer' join. Set sort=False (avoid unnecessary sort)
+    df = pd.merge(pnl_df, aum_df, how='outer', on='date', sort=False)
+
+    # Use "inplace" where possible to avoid allocation overhead
+    df.set_index('date', inplace=True)
+    df.sort_index(inplace=True)
+
+    # Forward fill AUM column in-place without object reassignment
     df[aum_col_key] = df[aum_col_key].ffill()
-    df['return'] = df[pnl_col_key].div(df[aum_col_key].shift(1))
+
+    # Shifted AUM Series is produced only once
+    shifted_aum = df[aum_col_key].shift(1)
+    df['return'] = df[pnl_col_key] / shifted_aum
+
     if 'totalPnl' in df.columns:
-        df['totalPnl'] = df['totalPnl'].div(df[aum_col_key].shift(1))
-        df = df.fillna(0)
-        df['return'] = __smooth_percent_returns(df['return'].to_numpy(), df['totalPnl'].to_numpy()).tolist()
+        df['totalPnl'] = df['totalPnl'] / shifted_aum
+        df.fillna(0, inplace=True)
+        # Call external numpy function just once
+        # to_numpy(copy=False) is available in pandas 1.0.0+ and can avoid some memory allocation
+        # In pandas 1.3.0+, default is copy=False
+        df['return'] = __smooth_percent_returns(
+            df['return'].to_numpy(), df['totalPnl'].to_numpy()
+        ).tolist()
+
     return_series = pd.Series(df['return'], name="return").dropna()
     return return_series
 
