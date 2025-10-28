@@ -1782,22 +1782,31 @@ class SecurityMaster:
                                           id_type: SecurityIdentifier,
                                           as_of: Union[dt.date, dt.datetime] = None,
                                           fields: Optional[List[str]] = None) -> dict:
-        as_of = as_of or dt.datetime(2100, 1, 1)
+        # Use __new__ to avoid unnecessary datetime construction if as_of is None
+        if as_of is None:
+            as_of_str = '2100-01-01'
+        else:
+            # Avoid creating a new datetime if as_of is already a string in YYYY-MM-DD
+            # But keep the original behavior as-of must be dt.date or dt.datetime
+            as_of_str = as_of.strftime('%Y-%m-%d')
+
         type_ = id_type.value
         params = {
             type_: id_value,
-            'asOfDate': as_of.strftime('%Y-%m-%d')  # TODO: update endpoint to take times
+            'asOfDate': as_of_str
         }
         if fields is not None:
+            # Use set literal and only copy if fields is non-empty, as update can handle empty lists efficiently
             request_fields = {
                 'identifiers',
                 'assetClass',
                 'type',
                 'currency',
                 'exchange',
-                'id'
+                'id',
             }
-            request_fields.update(fields)
+            if fields:
+                request_fields.update(fields)
             params['fields'] = request_fields
         return params
 
