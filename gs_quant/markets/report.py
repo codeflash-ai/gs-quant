@@ -475,17 +475,19 @@ class PerformanceReport(Report):
                     report: TargetReport):
         if report.type != ReportType.Portfolio_Performance_Analytics:
             raise MqValueError('This report is not a performance report.')
-        return PerformanceReport(report_id=report.id,
-                                 name=report.name,
-                                 position_source_id=report.position_source_id,
-                                 position_source_type=report.position_source_type,
-                                 report_type=report.type,
-                                 parameters=report.parameters,
-                                 earliest_start_date=report.earliest_start_date,
-                                 latest_end_date=report.latest_end_date,
-                                 latest_execution_time=report.latest_execution_time,
-                                 status=report.status,
-                                 percentage_complete=report.percentage_complete)
+        # Use cls and do not redundantly pass report_type; super().__init__ already hardcodes ReportType
+        return cls(
+            report_id=report.id,
+            name=report.name,
+            position_source_id=report.position_source_id,
+            position_source_type=report.position_source_type,
+            parameters=report.parameters,
+            earliest_start_date=report.earliest_start_date,
+            latest_end_date=report.latest_end_date,
+            latest_execution_time=report.latest_execution_time,
+            status=report.status,
+            percentage_complete=report.percentage_complete
+        )
 
     def get_pnl(self,
                 start_date: dt.date = None,
