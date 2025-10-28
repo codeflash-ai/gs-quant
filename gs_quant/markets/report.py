@@ -771,7 +771,9 @@ class PerformanceReport(Report):
         :return: list of AUM data between the specified range
         """
         aum_data = GsReportApi.get_custom_aum(self.id, start_date, end_date)
-        return [CustomAUMDataPoint(date=dt.datetime.strptime(data['date'], '%Y-%m-%d'),
+        return [CustomAUMDataPoint(date=dt.datetime.fromisoformat(data['date']) 
+                                        if data['date'].count('-') == 2 and len(data['date']) == 10
+                                        else dt.datetime.strptime(data['date'], '%Y-%m-%d'),
                                    aum=data['aum']) for data in aum_data]
 
     def get_aum(self,
