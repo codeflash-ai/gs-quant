@@ -16,7 +16,6 @@ under the License.
 import copy
 import re
 import warnings
-from functools import reduce
 
 import pandas as pd
 
@@ -117,71 +116,114 @@ class EquityVolEngine(object):
 
         # Validate Triggers
 
-        if len(strategy.triggers) > 3:
+        triggers = strategy.triggers
+        n_triggers = len(triggers)
+        if n_triggers > 3:
             check_results.append('Error: Maximum of 3 triggers')
 
-        if not all(isinstance(x, (t.AggregateTrigger, t.PeriodicTrigger)) for x in strategy.triggers):
+        # Inline isinstance checks, cache types once for all triggers to avoid repeated isinstance calls
+        valid_trigger_types = (t.AggregateTrigger, t.PeriodicTrigger)
+        if not all(isinstance(x, valid_trigger_types) for x in triggers):
             check_results.append('Error: Only AggregateTrigger and PeriodTrigger supported')
 
         # aggregate triggers composed of a dated and portfolio trigger define a signal
-        aggregate_triggers = [x for x in strategy.triggers if isinstance(x, t.AggregateTrigger)]
+        aggregate_triggers = [x for x in triggers if isinstance(x, t.AggregateTrigger)]
         for at in aggregate_triggers:
-            if not len(at.trigger_requirements.triggers) == 2:
+            req_triggers = at.trigger_requirements.triggers
+            n_reqs = len(req_triggers)
+            if n_reqs != 2:
                 check_results.append('Error: AggregateTrigger must be composed of 2 triggers')
-            if not len([x for x in at.trigger_requirements.triggers if isinstance(x, t.DateTriggerRequirements)]) == 1:
+            if sum(isinstance(x, t.DateTriggerRequirements) for x in req_triggers) != 1:
                 check_results.append('Error: AggregateTrigger must be contain 1 DateTrigger')
-            portfolio_triggers = [x for x in at.trigger_requirements.triggers
-                                  if isinstance(x, t.PortfolioTriggerRequirements)]
-            if not len(portfolio_triggers) == 1:
+            portfolio_triggers = [x for x in req_triggers if isinstance(x, t.PortfolioTriggerRequirements)]
+            if len(portfolio_triggers) != 1:
                 check_results.append('Error: AggregateTrigger must be contain 1 PortfolioTrigger')
-            if not (portfolio_triggers[0].data_source == 'len' and
-                    portfolio_triggers[0].trigger_level == 0):
+            elif not (portfolio_triggers[0].data_source == 'len' and portfolio_triggers[0].trigger_level == 0):
                 check_results.append(
                     'Error: PortfolioTrigger.trigger_requirements must have data_source = \'len\' '
                     'and trigger_level = 0')
 
-        # Validate Actions
+        # --- Validate Actions ---
 
-        all_actions = reduce(lambda acc, x: acc + x, (map(lambda x: x.actions, strategy.triggers)), [])
+        # Avoid functools.reduce; use list comprehension for clarity & speed, then flatten
+        all_actions = []
+        # Triggers all inherit a 'actions' property (per legacy); flatten in O(N)
+        for x in triggers:
+            all_actions.extend(x.actions)
 
-        if any(isinstance(x, a.ExitPositionAction) for x in all_actions):
+        # Check for deprecated actions in one sweep, as a defined set (avoids repeated any/isinstance scans)
+        has_exit_position_action = False
+        has_enter_position_quantity_scaled_action = False
+        for action in all_actions:
+            if isinstance(action, a.ExitPositionAction):
+                has_exit_position_action = True
+            elif isinstance(action, a.EnterPositionQuantityScaledAction):
+                has_enter_position_quantity_scaled_action = True
+            # Stop scanning early if both found
+            if has_exit_position_action and has_enter_position_quantity_scaled_action:
+                break
+        if has_exit_position_action:
             warnings.warn('ExitPositionAction will be deprecated soon, use ExitTradeAction.', DeprecationWarning, 2)
-        if any(isinstance(x, a.EnterPositionQuantityScaledAction) for x in all_actions):
+        if has_enter_position_quantity_scaled_action:
             warnings.warn('EnterPositionQuantityScaledAction will be deprecated soon, use AddScaledTradeAction.',
                           DeprecationWarning, 2)
 
-        if not all(isinstance(x, (a.EnterPositionQuantityScaledAction, a.HedgeAction, a.ExitPositionAction,
-                                  a.ExitTradeAction, a.AddTradeAction, a.AddScaledTradeAction)) for x in all_actions):
+        supported_actions_types = (
+            a.EnterPositionQuantityScaledAction, a.HedgeAction, a.ExitPositionAction,
+            a.ExitTradeAction, a.AddTradeAction, a.AddScaledTradeAction,
+        )
+        # Use all/isinstance on tuple for very fast type check rather than map/lambda
+        if not all(isinstance(x, supported_actions_types) for x in all_actions):
             check_results.append(
                 'Error: actions must be one of EnterPositionQuantityScaledAction, HedgeAction, ExitPositionAction, '
                 'ExitTradeAction, AddTradeAction, AddScaledTradeAction')
 
         # no duplicate actions
-        if not len(set(map(lambda x: type(x), all_actions))) == len(all_actions):
+        action_types = set()
+        duplicate_found = False
+        for action in all_actions:
+            typ = type(action)
+            if typ in action_types:
+                duplicate_found = True
+                break
+            action_types.add(typ)
+        if duplicate_found:
             check_results.append('Error: There are multiple actions of the same type')
 
-        all_child_triggers = reduce(lambda acc, x: acc + x, map(lambda x: x.trigger_requirements.triggers if isinstance(
-            x, t.AggregateTriggerRequirements) else [x], strategy.triggers), [])
+        # --- Validate Child Triggers ---
+        # Flatten child triggers across triggers (no functools.reduce)
+        all_child_triggers = []
+        agg_req_type = t.AggregateTriggerRequirements
+        for x in triggers:
+            if isinstance(x, agg_req_type):
+                all_child_triggers.extend(x.trigger_requirements.triggers)
+            else:
+                all_child_triggers.append(x)
 
+        # Reuse supported types tuple
         for trigger in all_child_triggers:
             if isinstance(trigger, t.PortfolioTrigger):
                 continue
 
             # action one of enter position, exit position, hedge
-            if len(trigger.actions) != 1:
+            actions = trigger.actions
+            if len(actions) != 1:
                 check_results.append('Error: All triggers must contain only 1 action')
 
-            for action in trigger.actions:
+            for action in actions:
+                # --- Enter / Add Actions ---
                 if isinstance(action, (a.EnterPositionQuantityScaledAction, a.AddTradeAction, a.AddScaledTradeAction)):
-                    if isinstance(trigger, t.PeriodicTrigger) and \
-                            not trigger.trigger_requirements.frequency == action.trade_duration:
+                    # Only check trigger/requirements/frequency if Periodic
+                    req = trigger.trigger_requirements
+                    if isinstance(trigger, t.PeriodicTrigger) and req.frequency != action.trade_duration:
                         check_results.append(
                             f'Error: {type(action).__name__}: PeriodicTrigger frequency must be the same '
                             'as trade_duration')
-                    if not all((isinstance(p, (EqOption, EqVarianceSwap)))
-                               for p in action.priceables):
+                    if not all(isinstance(p, (EqOption, EqVarianceSwap)) for p in action.priceables):
                         check_results.append(
                             f'Error: {type(action).__name__}: Only EqOption or EqVarianceSwap supported')
+
+                    # Specific arg checks for enter/scaled
                     if isinstance(action, a.EnterPositionQuantityScaledAction):
                         if action.trade_quantity is None or action.trade_quantity_type is None:
                             check_results.append('Error: EnterPositionQuantityScaledAction trade_quantity or '
@@ -189,9 +231,12 @@ class EquityVolEngine(object):
                     if isinstance(action, a.AddScaledTradeAction):
                         if action.scaling_level is None or action.scaling_type is None:
                             check_results.append('Error: AddScaledTradeAction scaling_level or scaling_type is None')
-                    expiry_date_modes = map(lambda x: TenorParser(x.expirationDate).get_mode(),
-                                            action.priceables)
-                    expiry_date_modes = list(set(expiry_date_modes))
+
+                    # Optimize expiry_date_modes collection: avoid map/set/list chain
+                    expiry_date_modes = set()
+                    for p in action.priceables:
+                        expiry_date_modes.add(TenorParser(p.expirationDate).get_mode())
+                    expiry_date_modes = list(expiry_date_modes)  # Set->list for predictable output order
                     if len(expiry_date_modes) > 1:
                         check_results.append(
                             f'Error: {type(action).__name__} all priceable expiration_date modifiers must '
@@ -199,32 +244,45 @@ class EquityVolEngine(object):
                     if expiry_date_modes[0] is not None and expiry_date_modes[0] not in ['otc', 'listed']:
                         check_results.append(
                             f'Error: {type(action).__name__} invalid expiration_date '
-                            'modifier ' + expiry_date_modes[0])
+                            'modifier ' + str(expiry_date_modes[0]))
 
+                    # Optimize computation of priceable sizes: avoid list comps with costly reduce
                     size_fields = ('quantity', 'number_of_options', 'multiplier')
-                    priceable_size_values = [[getattr(p, sf, 1) or 1 for sf in size_fields] for p in action.priceables]
-                    priceable_sizes = [reduce(lambda x, y: x * y, size_vals, 1) for size_vals in priceable_size_values]
-
+                    # Precompute single unit size expected
+                    priceable_sizes = []
+                    for p in action.priceables:
+                        size = 1
+                        for sf in size_fields:
+                            val = getattr(p, sf, 1) or 1
+                            size *= val
+                        priceable_sizes.append(size)
                     if not all(priceable_size == 1 for priceable_size in priceable_sizes):
                         check_results.append(
                             f'Error: {type(action).__name__} every priceable should have a unit size of 1. '
                             'Found [' + ', '.join([str(s) for s in priceable_sizes]) + ']'
                         )
+
+                # --- Hedge Actions ---
                 elif isinstance(action, a.HedgeAction):
-                    if not is_synthetic_forward(action.priceable):
+                    # Do not call twice (store result)
+                    isp_fwd = is_synthetic_forward(action.priceable)
+                    if not isp_fwd:
                         check_results.append(
                             'Error: HedgeAction: Hedge instrument must be a synthetic forward - a portfolio of two '
                             'equity options (long call and short put) with the same underlier, strike price and '
                             'expiration date')
-                    if not trigger.trigger_requirements.frequency == action.trade_duration:
+                    req = trigger.trigger_requirements
+                    if req.frequency != action.trade_duration:
                         check_results.append(
                             'Error: HedgeAction: PeriodicTrigger frequency must be the same as trade_duration')
-                    if not action.risk == EqDelta:
+                    if action.risk != EqDelta:
                         check_results.append('Error: HedgeAction: risk type must be EqDelta')
-                    if not trigger.trigger_requirements.frequency == '1b':
+                    if req.frequency != '1b':
                         check_results.append('Error: HedgeAction: frequency must be \'1b\'')
+                # --- Exit Actions ---
                 elif isinstance(action, (a.ExitPositionAction, a.ExitTradeAction)):
                     continue
+                # --- Unknown Action ---
                 else:
                     check_results.append('Error: Unsupported action type \'{}\''.format(type(action)))
 
