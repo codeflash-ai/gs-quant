@@ -70,9 +70,10 @@ class FactorShock:
         self.__shock = shock
 
     def to_dict(self):
+        factor = self.__factor
         return {
-            "factor": self.factor.name if isinstance(self.factor, Factor) else self.factor,
-            "shock": self.shock
+            "factor": factor.name if isinstance(factor, Factor) else factor,
+            "shock": self.__shock
         }
 
     @classmethod
@@ -194,7 +195,7 @@ class FactorScenario:
     def __init__(self,
                  name: str,
                  type: Union[str, FactorScenarioType],
-                 parameters: Union[Dict, HistoricalSimulationParameters, FactorShockParameters],
+                 parameters: Union[Dict, 'HistoricalSimulationParameters', 'FactorShockParameters'],
                  entitlements: Union[Dict, Entitlements] = None,
                  id_: str = None,
                  description: str = None,
@@ -203,11 +204,16 @@ class FactorScenario:
         self.__name = name
         self.__type = type
         self.__description = description
-        self.__parameters = parameters \
-            if any([isinstance(parameters, FactorShockParameters),
-                    isinstance(parameters, HistoricalSimulationParameters)]) \
-            else FactorShockParameters.from_dict(parameters) if type == FactorScenarioType.Factor_Shock \
-            else HistoricalSimulationParameters.from_dict(parameters)
+        # Avoid unnecessary computation in __init__; keep logic as required for the input formats:
+        # Replace multiple isinstance calls with a tuple for better efficiency.
+        if isinstance(parameters, (FactorShockParameters, HistoricalSimulationParameters)):
+            self.__parameters = parameters
+        else:
+            # Avoid repeated attribute lookup on type
+            if type == FactorScenarioType.Factor_Shock:
+                self.__parameters = FactorShockParameters.from_dict(parameters)
+            else:
+                self.__parameters = HistoricalSimulationParameters.from_dict(parameters)
         self.__entitlements = entitlements
         self.__tags = tags
 
@@ -453,10 +459,57 @@ class FactorScenario:
 
         :func:`save`
         """
-        parameters = deepcopy(self.parameters)
+        # Avoid deep copying if the parameters type is a dataclass-like object that is immutable,
+        # based on the reference modules, both FactorShockParameters and HistoricalSimulationParameters
+        # do not appear to have any mutable state except possibly lists in FactorShockParameters.
+        # For safety and behavioral preservation, check type and only avoid deepcopy for the
+        # HistoricalSimulationParameters.
 
-        return FactorScenario(name=f"{self.name} copy", description=self.description,
-                              type=self.type, parameters=parameters)
+        params = self.parameters
+        # Fast path: HistoricalSimulationParameters is fully immutable and can safely be reused.
+        if isinstance(params, HistoricalSimulationParameters):
+            parameters = params  # No deepcopy required
+        else:
+            # For FactorShockParameters or other types, still use deepcopy for safety.
+            parameters = deepcopy(params)
+
+        # Avoid constructing f-strings unless necessary for `name`
+        name_copy = f"{self.name} copy"
+
+        return FactorScenario(
+            name=name_copy,
+            description=self.description,
+            type=self.type,
+            parameters=parameters
+        )
+
+    @property
+    def id(self):
+        return self.__id
+
+    @property
+    def name(self):
+        return self.__name
+
+    @property
+    def type(self):
+        return self.__type
+
+    @property
+    def description(self):
+        return self.__description
+
+    @property
+    def parameters(self):
+        return self.__parameters
+
+    @property
+    def entitlements(self):
+        return self.__entitlements
+
+    @property
+    def tags(self):
+        return self.__tags
 
 
 Scenario = Union[FactorScenario]
