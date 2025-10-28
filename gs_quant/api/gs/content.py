@@ -118,7 +118,7 @@ class GsContentApi:
         parameters = {}
         for key, value in kwargs.items():
             if value:
-                parameters.setdefault(key, []).extend(sorted(value))
+                parameters.setdefault(key, []).extend(value if len(value) <= 1 else sorted(value))
         return OrderedDict(parameters)
 
     @classmethod
