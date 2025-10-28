@@ -70,28 +70,43 @@ def get_default_cache() -> AssetCache:
     ttl = 30  # seconds
 
     def in_memory_key_fn(session, *args, **kwargs):
-        args = [tuple(x) if isinstance(x, list) else x for x in args]  # tuples are hashable
-        for k, v in kwargs.items():
-            if isinstance(v, list):
-                kwargs[k] = tuple(v)
-
+        # Use tuple comprehensions for efficiency & avoid list conversion
+        if args:
+            args = tuple(tuple(x) if isinstance(x, list) else x for x in args)
+        # Update only list-valued kwargs, but avoid mutation of original kwargs
+        kwarg_items = ((k, tuple(v) if isinstance(v, list) else v) for k, v in kwargs.items())
+        # Build kwargs as a new dict for hashing safety; prevents mutation of the caller's dict
+        kwargs = dict(kwarg_items)
         k = cachetools.keys.hashkey(session, *args, **kwargs)
         return k
 
-    return AssetCache(cache=InMemoryApiRequestCache(1024, ttl),
-                      ttl=ttl,
-                      construct_key_fn=in_memory_key_fn)
+    # Only construct this once per process (singleton per python interpreter)
+    # Use a persistent static variable to avoid repeated creation
+    if not hasattr(get_default_cache, "_cache"):
+        get_default_cache._cache = AssetCache(
+            cache=InMemoryApiRequestCache(1024, ttl),
+            ttl=ttl,
+            construct_key_fn=in_memory_key_fn
+        )
+    return get_default_cache._cache
 
 
 def _cached(fn):
-    _fn_cache_lock = threading.Lock()
-    # short-term cache to avoid retrieving the same data several times in succession
-    fallback_cache: AssetCache = get_default_cache()
+    # Use function static vars for lock and fallback cache to ensure single instances
+    # Only initialize once per decorator usage (not per invocation)
+    if not hasattr(_cached, "_fn_cache_lock"):
+        _cached._fn_cache_lock = threading.Lock()
+    if not hasattr(_cached, "_fallback_cache"):
+        _cached._fallback_cache = get_default_cache()
+
+    _fn_cache_lock = _cached._fn_cache_lock
+    fallback_cache: 'AssetCache' = _cached._fallback_cache
 
     @wraps(fn)
     def wrapper(cls, *args, **kwargs):
         if os.environ.get(ENABLE_ASSET_CACHING):
             _logger.debug("Asset caching is enabled")
+            # Avoid repeated get_cache calls by storing result
             asset_cache = cls.get_cache() or fallback_cache
             k = asset_cache.construct_key(GsSession.current, fn.__name__, *args, **kwargs)
             with Tracer("acquiring cache lock"):
