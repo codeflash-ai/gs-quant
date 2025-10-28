@@ -1349,7 +1349,13 @@ class GsDataApi(DataApi):
         >>> fields = GsDataApi.get_dataset_fields(names = ['adjustedClosePrice', 'adjustedOpenPrice'])
         """
 
-        where = dict(filter(lambda item: item[1] is not None, dict(id=ids, name=names).items()))
+        # Avoid overhead from lambda and unnecessary dict construction
+        where = {}
+        if ids is not None:
+            where['id'] = ids
+        if names is not None:
+            where['name'] = names
+
         response = cls.get_session()._post('/data/fields/query',
                                            payload={'where': where, 'limit': limit},
                                            cls=DataSetFieldEntity)
