@@ -65,11 +65,10 @@ class OrderBasedActionImpl(ActionHandler, metaclass=ABCMeta):
     def get_base_orders_for_states(self, states: Collection[dt.date], **kwargs):
         orders = {}
         dated_priceables = getattr(self.action, 'dated_priceables', {})
-        with PricingContext():
-            for s in states:
-                active_portfolio = dated_priceables.get(s) or self.action.priceables
-                with PricingContext(pricing_date=s):
-                    orders[s] = Portfolio(active_portfolio).calc(tuple(self._order_valuations))
+        for s in states:
+            active_portfolio = dated_priceables.get(s) or self.action.priceables
+            with PricingContext(pricing_date=s):
+                orders[s] = Portfolio(active_portfolio).calc(tuple(self._order_valuations))
         return orders
 
     def get_instrument_final_date(self, inst: Instrument, order_date: dt.date, info: namedtuple):
