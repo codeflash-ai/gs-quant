@@ -200,7 +200,8 @@ def plot_session_function(fn):
 def check_forward_looking(pricing_date, source, name="function"):
     if pricing_date is not None or source != 'plottool':
         return
-    if DataContext.current.end_date <= dt.date.today():
+    today = dt.date.today()
+    if DataContext.current.end_date <= today:
         msg = (f'{name}() requires a forward looking date range e.g. [0d, 3y]. '
                'Please update the date range via the date picker.')
         raise MqValueError(msg)
