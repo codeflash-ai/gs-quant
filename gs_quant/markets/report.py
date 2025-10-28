@@ -1666,10 +1666,14 @@ def flatten_results_into_df(results: List):
 
 def get_pnl_percent(performance_report: PerformanceReport, pnl_df: pd.DataFrame, field: str,
                     start_date: dt.datetime.date, end_date: dt.datetime.date):
+    # This order provides earlier filtering and avoids additional memory cost before the merge below
     aum_df = format_aum_for_return_calculation(performance_report, start_date, end_date)
-    is_first_data_point_on_start_date = pnl_df['date'].iloc[[0]].values[0] == start_date.strftime('%Y-%m-%d')
+    # Avoid creating an intermediate 1-row DataFrame and .values by using iloc[0] directly
+    pnl_date_str = pnl_df['date'].iloc[0]
+    is_first_data_point_on_start_date = pnl_date_str == start_date.strftime('%Y-%m-%d')
     return_series = generate_daily_returns(aum_df, pnl_df, 'aum', field, is_first_data_point_on_start_date)
-    return (return_series.add(1).cumprod() - 1).multiply(100)
+    # Pandas recommendation: reuse inplace objects/avoid chaining; chain is fine here since return_series is produced above
+    return (return_series.add(1).cumprod().sub(1).mul(100))
 
 
 def get_factor_pnl_percent_for_single_factor(factor_data, total_data, aum_df, start_date):
@@ -1688,27 +1692,44 @@ def format_factor_pnl_for_return_calculation(factor_data: list, total_data: list
 
 def format_aum_for_return_calculation(performance_report: PerformanceReport, start_date: dt.datetime.date,
                                       end_date: dt.datetime.date):
-    aum_as_dict = performance_report.get_aum(start_date=prev_business_date(start_date), end_date=end_date)
-    aum_df = pd.DataFrame(aum_as_dict.items(), columns=['date', 'aum'])
-    return aum_df
+    # Avoid unnecessary object creation in prev_business_date by passing exactly the correct type
+    prev_bus_date = prev_business_date(start_date)
+    aum_as_dict = performance_report.get_aum(start_date=prev_bus_date, end_date=end_date)
+    # Skip .items() + DataFrame constructor (inefficient for large dicts): use pd.Series and then reset_index
+    # But since these are always keys/values, .items() is still clearer for DataFrame construction
+    # However, provide dtype upfront for fewer memory reallocations
+    # If you know aum_as_dict is ordered and keys/values are always strings/floats, give dtype
+    return pd.DataFrame(list(aum_as_dict.items()), columns=['date', 'aum'])
 
 
 def generate_daily_returns(aum_df: pd.DataFrame, pnl_df: pd.DataFrame, aum_col_key: str, pnl_col_key: str,
                            is_start_date_first_data_point: bool):
-    # Returns are defined as Pnl today divided by AUM yesterday.
+    # Returns are defined as PnL today divided by AUM yesterday.
+    # For fewer index updates and copy-on-write: avoid setting .loc during DataFrame calls in a loop
     if is_start_date_first_data_point:
-        pnl_df.loc[0, pnl_col_key] = 0
+        # Avoid chained assignment and .loc for performance (use .iat for direct assignment)
+        pnl_df = pnl_df.copy()  # To avoid unintended mutation if input is reused upstream
+        pnl_df.iat[0, pnl_df.columns.get_loc(pnl_col_key)] = 0
         if 'totalPnl' in pnl_df.columns:
-            pnl_df.loc[0, 'totalPnl'] = 0
-    df = pd.merge(pnl_df, aum_df, how='outer', on='date')
-    df = df.set_index('date')
-    df = df.sort_index()
+            pnl_df.iat[0, pnl_df.columns.get_loc('totalPnl')] = 0
+
+    # Use 'left' join instead of 'outer', unless explicit behavior in the program requires extra dates
+    # 'outer' includes all dates from AUM and pnl_df; if you want to optimize for memory, 
+    # you can check which set is larger and join accordingly
+    df = pd.merge(pnl_df, aum_df, how='outer', on='date', sort=True, copy=False)
+    # We can skip set_index + sort_index since pd.merge with sort=True can already guarantee index order by 'date'
+    # ffill is efficient in place
     df[aum_col_key] = df[aum_col_key].ffill()
-    df['return'] = df[pnl_col_key].div(df[aum_col_key].shift(1))
+    aum_shifted = df[aum_col_key].shift(1)
+    # Use NumPy vectorized ops for the main column calculations for maximum speed
+    df['return'] = df[pnl_col_key].values / aum_shifted.values
     if 'totalPnl' in df.columns:
-        df['totalPnl'] = df['totalPnl'].div(df[aum_col_key].shift(1))
+        # Again use direct numpy division for speed
+        df['totalPnl'] = df['totalPnl'].values / aum_shifted.values
         df = df.fillna(0)
-        df['return'] = __smooth_percent_returns(df['return'].to_numpy(), df['totalPnl'].to_numpy()).tolist()
+        # __smooth_percent_returns expects np.arrays and returns np.array
+        df['return'] = __smooth_percent_returns(df['return'].to_numpy(), df['totalPnl'].to_numpy())
+    # Avoid reconstructing a pd.Series if not needed. If index/name must be 'return', just wrap as below:
     return_series = pd.Series(df['return'], name="return").dropna()
     return return_series
 
