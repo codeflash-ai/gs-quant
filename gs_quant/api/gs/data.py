@@ -302,7 +302,16 @@ class GsDataApi(DataApi):
         if getattr(query, 'format', None) in (Format.MessagePack, 'MessagePack'):
             kwargs[_REQUEST_HEADERS] = {'Accept': 'application/msgpack'}
 
-        domain = cls._check_data_on_cloud(dataset_id)
+        # Cache _check_data_on_cloud results to avoid redundant calls during recursive get_results
+        cache_attr = '_data_on_cloud_cache'
+        if not hasattr(cls, cache_attr):
+            setattr(cls, cache_attr, {})
+        
+        cache = getattr(cls, cache_attr)
+        if dataset_id not in cache:
+            cache[dataset_id] = cls._check_data_on_cloud(dataset_id)
+        domain = cache[dataset_id]
+        
         return cls._post_with_cache_check('/data/{}/query'.format(dataset_id), domain=domain, **kwargs)
 
     @classmethod
