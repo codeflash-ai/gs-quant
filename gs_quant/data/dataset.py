@@ -35,6 +35,8 @@ from gs_quant.data.utilities import Utilities
 from gs_quant.target.data import (DataSetEntity, DataSetParameters, DataSetDimensions,
                                   FieldColumnPair, DataSetFieldEntity, DBConfig, DataSetType)
 
+_FIELD_FUNC_REGEX = re.compile(r"\w+\(")
+
 
 class InvalidInputException(Exception):
     pass
@@ -87,7 +89,7 @@ class Dataset:
     class TradingEconomics(Vendor):
         MACRO_EVENTS_CALENDAR = 'MACRO_EVENTS_CALENDAR'
 
-    def __init__(self, dataset_id: Union[str, Vendor], provider: Optional[DataApi] = None):
+    def __init__(self, dataset_id: Union[str, 'Vendor'], provider: Optional[DataApi] = None):
         """
 
         :param dataset_id: The dataset's identifier
@@ -118,9 +120,23 @@ class Dataset:
     def _build_data_query(
             self, start: Union[dt.date, dt.datetime], end: Union[dt.date, dt.datetime], as_of: dt.datetime,
             since: dt.datetime, fields: Iterable[Union[str, Fields]], empty_intervals: bool, **kwargs):
-        field_names = None if fields is None else list(map(lambda f: f if isinstance(f, str) else f.value, fields))
-        # check whether a function is called e.g. difference(tradePrice)
-        schema_varies = field_names is not None and any(map(lambda s: re.match("\\w+\\(", s), field_names))
+        # Optimize field_names construction: move to list comprehension (faster than map+lambda)
+        # Save isinstance(f, str) result as much as possible
+        if fields is None:
+            field_names = None
+        else:
+            # Inline, faster than map/lambda
+            field_names = [
+                f if isinstance(f, str) else f.value
+                for f in fields
+            ]
+
+        # Optimize field function detection by using a generator expression and pre-compiled regex
+        schema_varies = (
+            field_names is not None and 
+            any(_FIELD_FUNC_REGEX.match(s) for s in field_names)
+        )
+
         if kwargs and "date" in kwargs:
             d = kwargs["date"]
             if type(d) is str:
@@ -130,17 +146,31 @@ class Dataset:
                     pass  # Ignore error if date parameter is in some other format
             if "dates" not in kwargs and start is None and end is None:
                 kwargs["dates"] = (kwargs["date"],)
-        return self.provider.build_query(start=start, end=end, as_of=as_of, since=since, fields=field_names,
-                                         empty_intervals=empty_intervals, **kwargs), schema_varies
+
+        # Main bottleneck is in provider.build_query, cannot optimize further without internal modifications
+        return (
+            self.provider.build_query(
+                start=start,
+                end=end,
+                as_of=as_of,
+                since=since,
+                fields=field_names,
+                empty_intervals=empty_intervals,
+                **kwargs
+            ),
+            schema_varies
+        )
 
     def _build_data_frame(self, data, schema_varies, standard_fields) -> pd.DataFrame:
+        # No major optimization possible here without more visibility into provider.construct_dataframe_with_types
+        # Branch prediction: Most common path is non-tuple
         if type(data) is tuple:
-            df = self.provider.construct_dataframe_with_types(self.id, data[0], schema_varies,
-                                                              standard_fields=standard_fields)
+            df = self.provider.construct_dataframe_with_types(self.id, data[0], schema_varies, standard_fields=standard_fields)
+            # groupby(...).apply(lambda x: x) is equivalent to just returning the groupby object as concatenated groups;
+            # but for exact behavior, we must preserve code, as output may depend on custom index.
             return df.groupby(data[1], group_keys=True).apply(lambda x: x)
         else:
-            return self.provider.construct_dataframe_with_types(self.id, data, schema_varies,
-                                                                standard_fields=standard_fields)
+            return self.provider.construct_dataframe_with_types(self.id, data, schema_varies, standard_fields=standard_fields)
 
     def get_data(
             self,
@@ -213,7 +243,6 @@ class Dataset:
         >>> weather_data = await weather.get_data_async(dt.date(2016, 1, 15), dt.date(2016, 1, 16),
         >>>                                             city=('Boston', 'Austin'))
         """
-
         query, schema_varies = self._build_data_query(start, end, as_of, since, fields, empty_intervals, **kwargs)
         data = await self.provider.query_data_async(query, self.id)
         return self._build_data_frame(data, schema_varies, standard_fields)
@@ -595,6 +624,14 @@ class Dataset:
             )
 
             batch_number += 1
+
+    @property
+    def id(self):
+        return self.__id
+
+    @property
+    def provider(self):
+        return self.__provider
 
 
 class PTPDataset(Dataset):
