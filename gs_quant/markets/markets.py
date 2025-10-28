@@ -27,7 +27,12 @@ from gs_quant.target.data import MarketDataCoordinate as __MarketDataCoordinate,
 
 
 def historical_risk_key(risk_key: RiskKey) -> RiskKey:
-    market = LocationOnlyMarket(risk_key.market.location)
+    if not hasattr(historical_risk_key, '_location_cache'):
+        historical_risk_key._location_cache = {}
+    market = historical_risk_key._location_cache.get(risk_key.market.location)
+    if market is None:
+        market = LocationOnlyMarket(risk_key.market.location)
+        historical_risk_key._location_cache[risk_key.market.location] = market
     return RiskKey(risk_key.provider, None, market, risk_key.params, risk_key.scenario, risk_key.risk_measure)
 
 
