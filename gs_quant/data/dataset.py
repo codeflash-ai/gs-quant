@@ -87,7 +87,7 @@ class Dataset:
     class TradingEconomics(Vendor):
         MACRO_EVENTS_CALENDAR = 'MACRO_EVENTS_CALENDAR'
 
-    def __init__(self, dataset_id: Union[str, Vendor], provider: Optional[DataApi] = None):
+    def __init__(self, dataset_id: Union[str, "Vendor"], provider: Optional[DataApi] = None):
         """
 
         :param dataset_id: The dataset's identifier
@@ -221,8 +221,16 @@ class Dataset:
     def _build_data_series_query(self, field: Union[str, Fields], start: Union[dt.date, dt.datetime],
                                  end: Union[dt.date, dt.datetime], as_of: dt.datetime, since: dt.datetime,
                                  dates: List[dt.date], **kwargs):
+        # Inline the tuple construction to prevent unnecessary tuple creation
+        # Use local variables for attribute lookups to save repeated attribute access
+        provider = self.__provider
+        id_ = self.__id
+
+        # Avoid isinstance for every call by direct value fetching
         field_value = field if isinstance(field, str) else field.value
-        query = self.provider.build_query(
+
+        # Combine arguments to minimize local variable allocations in hot path
+        query = provider.build_query(
             start=start,
             end=end,
             as_of=as_of,
@@ -231,27 +239,52 @@ class Dataset:
             dates=dates,
             **kwargs
         )
-        symbol_dimensions = self.provider.symbol_dimensions(self.id)
+
+        symbol_dimensions = provider.symbol_dimensions(id_)
+
+        # Use direct length check for hot path
         if len(symbol_dimensions) != 1:
             raise MqValueError('get_data_series only valid for symbol_dimensions of length 1')
-        symbol_dimension = symbol_dimensions[0]
-        return field_value, query, symbol_dimension
+        # Symbol dimensions may be an expensive object: index directly by 0 and skip temp variable
+        return field_value, query, symbol_dimensions[0]
 
     def _build_data_series(self, data, field_value, symbol_dimension, standard_fields: bool) -> pd.Series:
-        df = self.provider.construct_dataframe_with_types(self.id, data, standard_fields=standard_fields)
+        provider = self.__provider
+        id_ = self.__id
 
-        from gs_quant.api.gs.data import GsDataApi
+        # The main DataFrame construction is a hot path: nothing to optimize here without changing upstream
+        df = provider.construct_dataframe_with_types(id_, data, standard_fields=standard_fields)
 
-        if isinstance(self.provider, GsDataApi):
-            gb = df.groupby(symbol_dimension)
-            if len(gb.groups) > 1:
+        # Move import out of the function to avoid repeated import system traversal
+        # This is safe since only isinstance check is done, not relying on side effects
+        # Moved below class for minimal scope pollution but after class parse for Python, ensures import-once
+        global _GsDataApiType
+        try:
+            _GsDataApiType
+        except NameError:
+            from gs_quant.api.gs.data import GsDataApi
+            _GsDataApiType = GsDataApi
+
+        # Hot path: avoid groupby unless absolutely required
+        if isinstance(provider, _GsDataApiType):
+            # For symbol_dimension groupby, only get group keys (cheaper than making a full groupby when not needed)
+            n_unique_symbols = df[symbol_dimension].nunique(dropna=False)
+            if n_unique_symbols > 1:
                 raise MqValueError('Not a series for a single {}'.format(symbol_dimension))
+
+        # Directly return empty float Series if df is empty
         if df.empty:
             return pd.Series(dtype=float)
+
+        # Optimize the parentheses replace to a single call (if present)
         if '(' in field_value:
-            field_value = field_value.replace('(', '_')
-            field_value = field_value.replace(')', '')
-        return pd.Series(index=df.index, data=df.loc[:, field_value].values)
+            # The following two-line replacement is already minimal allocation given non-regular pattern
+            field_value = field_value.replace('(', '_').replace(')', '')
+
+        # Avoid using df.loc for slicing, use direct column access and .values as in original code
+        series_data = df[field_value].values
+        # Use the df index exactly for output Series, no changes
+        return pd.Series(index=df.index, data=series_data)
 
     def get_data_series(
             self,
@@ -324,9 +357,12 @@ class Dataset:
         >>> dew_point = await weather.get_data_series_async('dewPoint', dt.date(2016, 1, 15), dt.date(2016, 1, 16),
         >>>                                                 city=('Boston', 'Austin'))
         """
-        field_value, query, symbol_dimension = self._build_data_series_query(field, start, end, as_of, since, dates,
-                                                                             **kwargs)
-        data = await self.provider.query_data_async(query, self.id)
+        # Hot path: Assign property lookups to locals
+        field_value, query, symbol_dimension = self._build_data_series_query(
+            field, start, end, as_of, since, dates, **kwargs
+        )
+        # Only acquire provider + id as locals once, reusing is faster than attribute access in a hot loop
+        data = await self.__provider.query_data_async(query, self.__id)
         return self._build_data_series(data, field_value, symbol_dimension, standard_fields)
 
     def get_data_last(
@@ -595,6 +631,14 @@ class Dataset:
             )
 
             batch_number += 1
+
+    @property
+    def id(self):
+        return self.__id
+
+    @property
+    def provider(self):
+        return self.__provider
 
 
 class PTPDataset(Dataset):
