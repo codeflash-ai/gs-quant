@@ -1627,20 +1627,34 @@ def get_thematic_breakdown_as_df(entity_id: str,
     :param basket_id: GS flagship basket's unique Marquee ID
     :return: a Pandas DataFrame with results
     """
-    results = GsThematicApi.get_thematics(entity_id=entity_id,
-                                          start_date=date,
-                                          end_date=date,
-                                          basket_ids=[basket_id],
-                                          measures=[ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET])
-    breakdown = results[0].get(
-        ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET.value, [{}])[0].get(
-        ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET.value, []
-    )
-    formatted_breakdown = []
-    for data in breakdown:
-        formatted_data = {titleize(k): data[k] for k in data}
-        formatted_breakdown.append(formatted_data)
-    return pd.DataFrame(formatted_breakdown)
+    results = GsThematicApi.get_thematics(
+        entity_id=entity_id,
+        start_date=date,
+        end_date=date,
+        basket_ids=[basket_id],
+        measures=[ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET])
+
+    # Extraction and fallback with minimum indexing and lookups
+    if results and isinstance(results, list):
+        thematic_section = results[0].get(ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET.value)
+        if thematic_section and isinstance(thematic_section, list):
+            breakdown = thematic_section[0].get(ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET.value, [])
+        else:
+            breakdown = []
+    else:
+        breakdown = []
+
+    if not breakdown:
+        return pd.DataFrame()  # empty DataFrame early exit
+
+    # Vectorized column titleizing for large breakdowns
+    columns = list(breakdown[0].keys()) if breakdown else []
+    titleized_columns = [titleize(col) for col in columns]
+    # Collect all rows as lists aligned to columns, then use DataFrame.from_records
+    records = ([data.get(col, None) for col in columns] for data in breakdown)
+    # pd.DataFrame.from_records is faster with many rows and avoids unnecessary dict construction
+    df = pd.DataFrame.from_records(records, columns=titleized_columns)
+    return df
 
 
 def flatten_results_into_df(results: List):
