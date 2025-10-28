@@ -70,9 +70,10 @@ class FactorShock:
         self.__shock = shock
 
     def to_dict(self):
+        factor = self.__factor
         return {
-            "factor": self.factor.name if isinstance(self.factor, Factor) else self.factor,
-            "shock": self.shock
+            "factor": factor.name if isinstance(factor, Factor) else factor,
+            "shock": self.__shock
         }
 
     @classmethod
@@ -145,6 +146,7 @@ class FactorShockParameters:
 
 
 class HistoricalSimulationParameters:
+    
     def __init__(self,
                  start_date: dt.date = None,
                  end_date: dt.date = None):
@@ -182,7 +184,15 @@ class HistoricalSimulationParameters:
                    end_date=dt.datetime.strptime(obj.get('endDate'), "%Y-%m-%d").date())
 
     def to_dict(self) -> Dict:
-        return {"startDate": self.start_date, "endDate": self.end_date}
+        return {"startDate": self.__start_date, "endDate": self.__end_date}
+
+    @property
+    def start_date(self) -> dt.date:
+        return self.__start_date
+
+    @property
+    def end_date(self) -> dt.date:
+        return self.__end_date
 
 
 ScenarioParameters = Union[FactorShockParameters, HistoricalSimulationParameters]
