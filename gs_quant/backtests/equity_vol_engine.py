@@ -86,12 +86,12 @@ class BacktestResult:
         return df.set_index('date').value
 
     def get_portfolio_history(self):
-        data = []
-        for item in self._results.portfolio:
-            positions = list(map(lambda x: dict({'date': item['date'], 'quantity': x['quantity']}, **x['instrument']),
-                                 item['positions']))
-            data = data + positions
-
+        # Collect all dictionaries in a single list using list comprehension (faster than map+lambda+list+concatenation)
+        data = [
+            dict({'date': item['date'], 'quantity': pos['quantity']}, **pos['instrument'])
+            for item in self._results.portfolio
+            for pos in item['positions']
+        ]
         return pd.DataFrame(data)
 
     def get_trade_history(self):
