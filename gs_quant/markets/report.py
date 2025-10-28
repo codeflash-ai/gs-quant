@@ -1732,11 +1732,29 @@ def __smooth_percent_returns(daily_factor_returns: np.array, daily_total_returns
 
     For this use case benchmark returns are set to 0 for every day.
     """
-    total_return = np.prod(daily_total_returns + 1) - 1
-    log_scaling_factor = total_return / (np.log(1 + total_return)) if total_return != 0 else 1
-    perturbation_factors = np.log(1 + daily_total_returns) / daily_total_returns
-    perturbation_factors = np.nan_to_num(perturbation_factors, nan=1)
-    return np.cumsum(daily_factor_returns * log_scaling_factor * perturbation_factors * 100)
+
+    # Precompute (1 + daily_total_returns) for re-use
+    one_plus_total_returns = np.add(1.0, daily_total_returns)
+    total_return = np.prod(one_plus_total_returns) - 1.0
+
+    # Log scaling factor computation
+    if total_return != 0:
+        log_scaling_factor = total_return / np.log1p(total_return)
+    else:
+        log_scaling_factor = 1.0
+
+    # Compute perturbation factors, using np.log1p for better accuracy with small returns
+    # Also, use np.divide for faster, in-place safe division
+    perturbation_factors = np.empty_like(daily_total_returns)
+    np.divide(np.log1p(daily_total_returns), daily_total_returns, out=perturbation_factors, where=daily_total_returns != 0)
+    # Where daily_total_returns == 0, set perturbation to 1
+    perturbation_factors[daily_total_returns == 0] = 1.0
+
+    # Single fused multiply for efficiency
+    out = np.empty_like(daily_factor_returns)
+    np.multiply(daily_factor_returns, log_scaling_factor * 100, out=out)
+    np.multiply(out, perturbation_factors, out=out)
+    return np.cumsum(out)
 
 
 def _filter_table_by_factor_and_category(column_info: Dict, factors: List, factor_categories: List):
