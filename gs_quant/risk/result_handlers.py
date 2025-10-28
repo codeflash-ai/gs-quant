@@ -28,25 +28,39 @@ _logger = logging.getLogger(__name__)
 
 def __dataframe_handler(result: Iterable, mappings: tuple, risk_key: RiskKey, request_id: Optional[str] = None) \
         -> DataFrameWithInfo:
-    first_row = next(iter(result), None)
+    result_iter = iter(result)
+    try:
+        first_row = next(result_iter)
+    except StopIteration:
+        first_row = None
     if first_row is None:
         return DataFrameWithInfo(risk_key=risk_key, request_id=request_id)
 
-    columns = ()
-    indices = [False] * len(first_row.keys())
+    columns = []
+    indices = []
+    key_list = list(first_row.keys())
     mappings_lookup = {v: k for k, v in mappings}
 
-    for idx, src in enumerate(first_row.keys()):
+    # Precompute columns and the indices to keep for performance.
+    for idx, src in enumerate(key_list):
         if src in mappings_lookup:
-            indices[idx] = True
-            columns += ((mappings_lookup[src]),)
+            indices.append(idx)
+            columns.append(mappings_lookup[src])
+    columns_tuple = tuple(columns)
 
-    records = tuple(
-        sort_values((tuple(v for i, v in enumerate(r.values()) if indices[i]) for r in result), columns, columns)
-    )
+    # Use generator directly on known keys, only once on the remaining result_iter, include first row.
+    def _filtered_rows():
+        # Include first_row
+        yield tuple(first_row[k] for k in key_list if k in mappings_lookup)
+        for r in result_iter:
+            yield tuple(r[k] for k in key_list if k in mappings_lookup)
+
+    # sort_values accepts an Iterable but sorts the data anyway, so collect into tuple only once after sorting
+    filtered_records = sort_values(_filtered_rows(), columns_tuple, columns_tuple)
+    records = tuple(filtered_records)
 
     df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
-    df.columns = columns
+    df.columns = columns_tuple
 
     return df
 
@@ -315,14 +329,18 @@ def mdapi_second_order_table_handler(result: dict, risk_key: RiskKey, _instrumen
 
 def mdapi_table_handler(result: dict, risk_key: RiskKey, _instrument: InstrumentBase,
                         request_id: Optional[str] = None) -> DataFrameWithInfo:
+    # Combine updates to the 'coordinate' dict in a single pass for efficiency.
+    rows = result['rows']
     coordinates = []
-    for r in result['rows']:
-        raw_point = r['coordinate'].get('point', '')
+    append = coordinates.append
+    for r in rows:
+        coordinate = r['coordinate']
+        raw_point = coordinate.get('point', '')
         point = ';'.join(raw_point) if isinstance(raw_point, list) else raw_point
-        r['coordinate'].update({'point': point})
-        r['coordinate'].update({'value': r.get('value', None)})
-        r['coordinate'].update({'permissions': r['permissions']})
-        coordinates.append(r['coordinate'])
+        coordinate['point'] = point
+        coordinate['value'] = r.get('value', None)
+        coordinate['permissions'] = r['permissions']
+        append(coordinate)
 
     mappings = (('mkt_type', 'type'),
                 ('mkt_asset', 'asset'),
