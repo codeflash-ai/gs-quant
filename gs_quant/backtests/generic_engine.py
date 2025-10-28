@@ -137,8 +137,12 @@ class AddTradeActionImpl(OrderBasedActionImpl):
 class AddScaledTradeActionImpl(OrderBasedActionImpl):
     def __init__(self, action: AddScaledTradeAction):
         super().__init__(action)
-        self._scaling_level_signal = interpolate_signal(self.action.scaling_level) \
-            if isinstance(self.action.scaling_level, dict) else None
+        if isinstance(self.action.scaling_level, dict):
+            self._scaling_level_signal = interpolate_signal(self.action.scaling_level)
+            self._scaling_level_signal_values = self._scaling_level_signal.values
+            self._scaling_level_signal_index_map = {date: idx for idx, date in enumerate(self._scaling_level_signal.index)}
+        else:
+            self._scaling_level_signal = None
 
     @staticmethod
     def __portfolio_scaling_for_available_cash(portfolio, available_cash, cur_day, unscaled_prices_by_day,
@@ -248,9 +252,11 @@ class AddScaledTradeActionImpl(OrderBasedActionImpl):
                 orders[day].scale(scaling_factors_by_day[day])
 
     def _scaling_level_for_date(self, d: dt.date) -> float:
+        # Avoid pandas __contains__ and __getitem__ in hotpath, use a cached index mapping
         if self._scaling_level_signal is not None:
-            if d in self._scaling_level_signal:
-                return self._scaling_level_signal[d]
+            idx = self._scaling_level_signal_index_map.get(d)
+            if idx is not None:
+                return self._scaling_level_signal_values[idx]
             return 0
         else:
             return self.action.scaling_level
