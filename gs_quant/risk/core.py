@@ -19,7 +19,7 @@ from abc import ABCMeta, abstractmethod
 from concurrent.futures import Future
 from copy import copy
 from dataclasses import dataclass, fields
-from typing import Iterable, Optional, Union, Tuple, Dict, Callable, List
+from typing import Iterable, Optional, Union, Tuple, Dict
 
 import pandas as pd
 from dataclasses_json import dataclass_json
@@ -554,15 +554,21 @@ def subtract_risk(left: DataFrameWithInfo, right: DataFrameWithInfo) -> pd.DataF
 
 
 def sort_values(data: Iterable, columns: Tuple[str, ...], by: Tuple[str, ...]) -> Iterable:
-    indices = tuple(columns.index(c) for c in by if c in columns)
-    fns: List[Optional[Callable[[any], Optional[float]]]] = [None] * len(columns)
-    for idx in indices:
-        fns[idx] = __column_sort_fns.get(columns[idx])
+    # Precompute indices and column sort functions for fields used in sorting
+    indices = [columns.index(c) for c in by if c in columns]
+    fns = [__column_sort_fns.get(columns[idx]) for idx in indices]
 
+    # Store indices and corresponding functions in a local tuple for better locality
     def cmp(row) -> tuple:
-        return tuple((fns[i](row[i]) or 0) if fns[i] else row[i] for i in indices)
+        return tuple( (fn(row[idx]) if fn else row[idx]) if (fn or row[idx] is not None) else 0 for idx, fn in zip(indices, fns) )
 
-    return sorted(data, key=cmp)
+    # In case data is a numpy array, convert to list for fast iteration if not already a list
+    if hasattr(data, 'tolist'):
+        data_seq = data.tolist()
+    else:
+        # Usually safe; sorted will iterate anyway, but to avoid iterator overhead for large input
+        data_seq = data if isinstance(data, list) else list(data)
+    return sorted(data_seq, key=cmp)
 
 
 def sort_risk(df: pd.DataFrame, by: Tuple[str, ...] = __risk_columns) -> pd.DataFrame:
@@ -574,12 +580,17 @@ def sort_risk(df: pd.DataFrame, by: Tuple[str, ...] = __risk_columns) -> pd.Data
     :return: A sorted Dataframe
     """
     columns = tuple(df.columns)
+    # Directly use df.values for high-performance row-wise access
     data = sort_values(df.values, columns, by)
+
+    # Prepare column order: fields in 'by' retaining their original order, then all remaining fields
     df_fields = [f for f in by if f in columns]
     df_fields.extend(f for f in columns if f not in df_fields)
 
-    result = pd.DataFrame.from_records(data, columns=columns)[df_fields]
-    if 'date' in result:
+    # Use array-based construction for best performance on large tables
+    result = pd.DataFrame(data, columns=columns)[df_fields]
+    # Only set index if 'date' is present
+    if 'date' in result.columns:
         result = result.set_index('date')
 
     return result
