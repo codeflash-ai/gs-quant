@@ -73,9 +73,11 @@ class GsSecurityMasterFederatedApi:
         @return: dict
         """
 
-        if not id.startswith("GS") and not id.startswith("MA"):
+        # Use tuple for startswith for slightly faster check
+        if not id.startswith(("GS", "MA")):
             raise ValueError(f"Invalid id: {id}. Security id starts with 'GS' and Asset id starts with 'MA'")
 
+        # Use f-string directly for path, no change
         return GsSession.current._get(f'{SECURITIES_FEDERATED}/{id}/identifiers')
 
     @classmethod
