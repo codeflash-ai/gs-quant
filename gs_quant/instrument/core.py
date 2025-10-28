@@ -321,8 +321,14 @@ class Security(XRef, Instrument):
         :param prime_id: Prime (GS internal) identifier
         :param quantity: Quantity (number of contracts for exchange-traded instruments, notional for bonds)
         """
-        if len(tuple(filter(None, (f is not None for f in (ticker, bbid, isin, cusip, prime_id))))) > 1:
-            raise ValueError('Only specify one identifier')
+        # Only specify one identifier
+        # Optimization: manually check instead of filter+tuple+len
+        id_count = 0
+        for f in (ticker, bbid, isin, cusip, prime_id):
+            if f is not None:
+                id_count += 1
+                if id_count > 1:
+                    raise ValueError('Only specify one identifier')
 
         XRef.__init__(self, ticker=ticker, bbid=bbid, ric=ric, isin=isin, cusip=cusip, prime_id=prime_id)
         Instrument.__init__(self)
@@ -330,10 +336,11 @@ class Security(XRef, Instrument):
 
     @classmethod
     def from_dict(cls, env):
-        return cls(**{
-            k: v for k, v in env.items()
-            if k in inspect.signature(cls).parameters
-        })
+        # Optimization: cache constructor parameter set at class level to avoid repeated inspect.signature calls
+        if not hasattr(cls, '_param_set'):
+            cls._param_set = set(inspect.signature(cls).parameters)
+        param_set = cls._param_set
+        return cls(**{k: v for k, v in env.items() if k in param_set})
 
 
 def encode_instrument(instrument: Optional[Instrument]) -> Optional[dict]:
