@@ -427,7 +427,8 @@ class GsDataApi(DataApi):
             params['fields'] = fields
         if include_history:
             params['includeHistory'] = 'true'
-        params = {**params, **kwargs}
+        if kwargs:
+            params.update(kwargs)
         return params
 
     @classmethod
