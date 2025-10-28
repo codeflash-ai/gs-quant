@@ -38,10 +38,9 @@ def market_location(location: Optional[PricingLocation] = None) -> PricingLocati
     :param location: optional PricingLocation
     :return: PricingLocation
     """
-    from .core import PricingContext
-    default = PricingContext.current.market_data_location
-
     if location is None:
+        from .core import PricingContext
+        default = PricingContext.current.market_data_location
         return default or PricingLocation.LDN
     else:
         return location
