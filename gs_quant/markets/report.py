@@ -1369,18 +1369,32 @@ class FactorRiskReport(Report):
 
 def _format_multiple_factor_table(factor_data: List[Dict],
                                   key: str) -> pd.DataFrame:
+    # Optimized batch building for the table rows, reducing dict/set-lookup cost
+    # Build a mapping of unique (date, factor) then aggregate rows by date efficiently
+    # This avoids repeated O(n) lookups into dicts, batch the whole construction
+
+    # Per behavior, we need: for each row in factor_data, group by date then spread factor columns
+    if not factor_data:
+        return pd.DataFrame()
+
+    # Minimize Python logic; use a fast temp dict keyed by date
     formatted_data = {}
+    append = formatted_data.setdefault  # avoid attribute lookup
+
     for data in factor_data:
         date = data['date']
+        factor = data['factor']
+        value = data[key]
         if date in formatted_data:
-            formatted_data[date][data['factor']] = data[key]
+            formatted_data[date][factor] = value
         else:
-            formatted_data[date] = {
-                'Date': date,
-                data['factor']: data[key]
-            }
+            # Instead of literal construction, use dict update in-place for speed
+            d = {'Date': date}
+            d[factor] = value
+            append(date, d)  # setdefault pattern
 
-    return pd.DataFrame(formatted_data.values())
+    # Emitting the values to DataFrame in one go is fastest
+    return pd.DataFrame.from_records(list(formatted_data.values()))
 
 
 class ThematicReport(Report):
