@@ -57,11 +57,11 @@ def __dataframe_handler_unsorted(result: Iterable, mappings: tuple, date_cols: t
     if first_row is None:
         return DataFrameWithInfo(risk_key=risk_key, request_id=request_id)
 
-    records = ([row.get(field_from) for field_to, field_from in mappings] for row in result)
+    records = [[row.get(field_from) for field_to, field_from in mappings] for row in result]
     df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
     df.columns = [m[0] for m in mappings]
     for dt_col in date_cols:
-        df[dt_col] = df[dt_col].map(lambda x: dt.datetime.strptime(x, '%Y-%m-%d').date() if isinstance(x, str) else x)
+        df[dt_col] = df[dt_col].apply(__str_to_date_fast)
 
     return df
 
@@ -435,6 +435,16 @@ def market_handler(result: dict, risk_key: RiskKey, _instrument: InstrumentBase,
 def unsupported_handler(_result: dict, risk_key: RiskKey, _instrument: InstrumentBase,
                         request_id: Optional[str] = None) -> UnsupportedValue:
     return UnsupportedValue(risk_key, request_id=request_id)
+
+
+def __str_to_date_fast(x):
+    if isinstance(x, str):
+        try:
+            year, month, day = x.split('-')
+            return dt.date(int(year), int(month), int(day))
+        except Exception:
+            return dt.datetime.strptime(x, '%Y-%m-%d').date()
+    return x
 
 
 result_handlers = {
