@@ -134,10 +134,11 @@ class Dataset:
                                          empty_intervals=empty_intervals, **kwargs), schema_varies
 
     def _build_data_frame(self, data, schema_varies, standard_fields) -> pd.DataFrame:
-        if type(data) is tuple:
+        if isinstance(data, tuple):
             df = self.provider.construct_dataframe_with_types(self.id, data[0], schema_varies,
                                                               standard_fields=standard_fields)
-            return df.groupby(data[1], group_keys=True).apply(lambda x: x)
+            # .apply(lambda x: x) is a no-op and inefficient
+            return df.groupby(data[1], group_keys=True)
         else:
             return self.provider.construct_dataframe_with_types(self.id, data, schema_varies,
                                                                 standard_fields=standard_fields)
