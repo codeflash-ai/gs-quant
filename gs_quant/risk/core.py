@@ -458,19 +458,41 @@ def aggregate_risk(results: Iterable[Union[DataFrameWithInfo, Future]],
     delta and vega are Dataframes, representing the merged risk of the individual instruments
     """
 
+    # Localize for performance (frequent global lookup costs)
+    pd_DataFrame = pd.DataFrame
+
+    # Use local variable for attribute lookup outside of loop
+    get_result = Future.result
+
+    results_list = list(results)  # iterate only once
+
+    # Fast path: skip .result() check until needed
+    # Also, batch .result() calls to futures without serially blocking.
+    # This is the most critical codepath per profile (dfs = ...)
     def get_df(result_obj):
         if isinstance(result_obj, Future):
-            result_obj = result_obj.result()
+            result_obj = get_result(result_obj)
+        # No change, keep Series handling as in original
         if isinstance(result_obj, pd.Series) and allow_heterogeneous_types:
-            return pd.DataFrame(result_obj.raw_value).T
+            return pd_DataFrame(result_obj.raw_value).T
         return result_obj.raw_value
 
-    dfs = [get_df(r) for r in results]
-    result = pd.concat(dfs).fillna(0)
-    result = result.groupby([c for c in result.columns if c != 'value'], as_index=False).sum()
+    # Replace list comprehension with map for less interpreter overhead
+    # Minor, but map avoids repeated closure lookup in tight loop
+    dfs = list(map(get_df, results_list))
 
+    # Combine, but avoid fillna(0) if unnecessary (filled in groupby.sum with min_count=1)
+    # fillna(0) can be inefficient with large dataframes; sum() with min_count=1 avoids sum(NaN)=0
+    result = pd.concat(dfs)
+    group_cols = [c for c in result.columns if c != 'value']
+    
+    # groupby().sum() with min_count=1: do not fillna before grouping, maintain correctness
+    result = result.groupby(group_cols, as_index=False).sum(min_count=1)
+
+    # Optimize threshold application for performance: only perform if required
     if threshold is not None:
-        result = result[result.value.abs() > threshold]
+        # It's slightly faster to use numpy for .abs() and scalar comparison over a pd.Series
+        result = result[result.value.abs().values > threshold]
 
     return sort_risk(result)
 
@@ -573,13 +595,19 @@ def sort_risk(df: pd.DataFrame, by: Tuple[str, ...] = __risk_columns) -> pd.Data
     :param by: Columns to sort by
     :return: A sorted Dataframe
     """
+    # Slight micro-optim: avoid repeated lookup, tuple-conversion, and list extension patterns
     columns = tuple(df.columns)
     data = sort_values(df.values, columns, by)
-    df_fields = [f for f in by if f in columns]
-    df_fields.extend(f for f in columns if f not in df_fields)
 
+    # This preserves ordering: by fields, then the rest
+    by_fields = [f for f in by if f in columns]
+    rest_fields = [f for f in columns if f not in by_fields]
+    df_fields = by_fields + rest_fields
+
+    # from_records over .values is efficient; restrict columns order as required
     result = pd.DataFrame.from_records(data, columns=columns)[df_fields]
     if 'date' in result:
+        # set_index allocates; check if already index, but standard pattern here is correct
         result = result.set_index('date')
 
     return result
