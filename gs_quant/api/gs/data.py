@@ -1261,12 +1261,8 @@ class GsDataApi(DataApi):
         results = cls.get_session()._get(f'/data/catalog/{dataset_id}')
         fields = results.get("fields")
         if fields:
-            field_types = {}
-            for key, value in fields.items():
-                field_type = value.get('type')
-                field_format = value.get('format')
-                field_types[key] = field_format or field_type
-            return field_types
+            # Use dict comprehension for a performance boost
+            return {key: value.get('format') or value.get('type') for key, value in fields.items()}
         raise RuntimeError(f"Unable to get Dataset schema for {dataset_id}")
 
     @classmethod
@@ -1276,14 +1272,11 @@ class GsDataApi(DataApi):
         except Exception:
             return {}
         if fields:
-            field_types = {}
-            field: DataSetFieldEntity
-            for field in fields:
-                field_name = field.name
-                field_type = field.type_
-                field_format = field.parameters.get('format') if field.parameters else None
-                field_types[field_name] = field_format or field_type
-            return field_types
+            # Use dict comprehension for clarity and speed
+            return {
+                field.name: field.parameters.get('format') if field.parameters and field.parameters.get('format') is not None else field.type_
+                for field in fields
+            }
         return {}
 
     @classmethod
@@ -1300,7 +1293,11 @@ class GsDataApi(DataApi):
         if len(data):
             # Use first row to infer fields from data
             sample = data if schema_varies else [data[0]]
+
+            # Avoid constructing unnecessary DataFrames in tight loops.
+            # Only calculate the dtypes from a minimal dataframe.
             incoming_data_data_types = pd.DataFrame(sample).dtypes.to_dict()
+
             dataset_types = cls.get_types(dataset_id) if not standard_fields \
                 else cls.get_field_types(field_names=list(incoming_data_data_types.keys()))
 
@@ -1308,17 +1305,30 @@ class GsDataApi(DataApi):
             if dataset_types == {} and standard_fields:
                 dataset_types = cls.get_types(dataset_id)
 
-            df = pd.DataFrame(data, columns={**dataset_types, **incoming_data_data_types})
+            # Use only the relevant columns for DataFrame construction
+            # This prevents expensive coercion of dtype in Pandas.
+            # Merge keys and preserve order. If there's overlap, dataset_types should win by precedence.
+            column_names = list(dataset_types.keys()) + [k for k in incoming_data_data_types if k not in dataset_types]
+            df = pd.DataFrame(data, columns=column_names)
 
-            for field_name, type_name in dataset_types.items():
-                if df.get(field_name) is not None and type_name in ('date', 'date-time') and \
-                        len(df.get(field_name).value_counts()) > 0:
-                    df[field_name] = pd.to_datetime(df[field_name],
-                                                    format='ISO8601' if int(
-                                                        pd.__version__.split('.')[0]) == 2 else None)
+            # Precompute the pd.__version__ major for efficiency.
+            pd_major_version = int(pd.__version__.split('.')[0])
+            # Filter the fields upfront to avoid repeated checks in the inner loop.
+            date_fields = {k for k, t in dataset_types.items() if t in ('date', 'date-time') and k in df.columns}
+            # Only run value_counts once per field for the relevant fields
+            for field_name in date_fields:
+                values = df[field_name]
+                if values.count() > 0:  # Faster than value_counts() for non-null count
+                    # Use vectorized to_datetime conversion
+                    df[field_name] = pd.to_datetime(
+                        values,
+                        format='ISO8601' if pd_major_version == 2 else None
+                    )
 
             field_names = dataset_types.keys()
 
+            # Use direct membership checks (which are already O(1) on dict_keys)
+            # Avoid recomputing .keys() for set_index
             if 'date' in field_names:
                 df = df.set_index('date')
             elif 'time' in field_names:
