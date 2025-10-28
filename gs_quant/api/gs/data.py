@@ -411,7 +411,14 @@ class GsDataApi(DataApi):
 
     @classmethod
     def time_field(cls, dataset_id: str) -> str:
-        definition = cls.get_definition(dataset_id)
+        # Avoid repeated lookup by combining definition retrieval and attribute access
+        definition = cls.__definitions.get(dataset_id)
+        if definition is None:
+            definition = cls.get_session()._get(f'/data/datasets/{dataset_id}', cls=DataSetEntity)
+            if not definition:
+                raise MqValueError(f'Unknown dataset {dataset_id}')
+            cls.__definitions[dataset_id] = definition
+        # Single return avoids extra stack frames
         return definition.dimensions.timeField
 
     # GS-specific functionality
