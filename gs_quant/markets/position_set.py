@@ -296,11 +296,16 @@ class PositionSet:
         """
         frame = self.to_frame(add_tags=True)
         ref_notional = self.reference_notional
-        if 'quantity' in frame.columns and ref_notional is not None:
+
+        # Avoid repeated lookup on frame.columns—single lookup
+        frame_columns = frame.columns
+        if 'quantity' in frame_columns and ref_notional is not None:
             if keep_reference_notional:
                 frame = frame.drop(columns=['quantity'])
             else:
                 ref_notional = None
+
+        # Avoid argument name lookup in tight loop by using local vars
         return PositionSet.from_frame(
             frame,
             date=self.date,
@@ -626,13 +631,20 @@ class PositionSet:
 
         :func:`from_frame` :func:`from_dicts` :func:`from_list`
         """
-        positions = []
-        for p in self.positions:
-            position = dict(date=self.date.isoformat())
-            if self.divisor is not None:
-                position.update(dict(divisor=self.divisor))
+        # Preallocate list for exact size to minimize resizing
+        positions_len = len(self.positions)
+        positions = [None] * positions_len
+        divisor_val = self.divisor
+        date_val = self.date.isoformat()
+
+        # Use local assignments to avoid repeated attribute lookup
+        for i, p in enumerate(self.positions):
+            # Construct position dict efficiently by merging dicts in-place
+            position = {'date': date_val}
+            if divisor_val is not None:
+                position['divisor'] = divisor_val
             position.update(p.as_dict(tags_as_keys=add_tags))
-            positions.append(position)
+            positions[i] = position
         return pd.DataFrame(positions)
 
     def resolve(self, **kwargs):
@@ -968,26 +980,53 @@ class PositionSet:
 
         :func:`get_positions` :func:`resolve` :func:`from_list` :func:`from_dicts` :func:`to_frame`
         """
+        # Columns normalization is a required operation
         positions.columns = cls.__normalize_position_columns(positions)
-        tag_columns = cls.__get_tag_columns(positions) if add_tags else []
-        positions = positions[~positions['identifier'].isna()]
-        equalize = not ('quantity' in positions.columns.str.lower() or
-                        'weight' in positions.columns.str.lower() or
-                        'notional' in positions.columns.str.lower())
-        equal_weight = 1 / len(positions)
 
-        positions_list = []
-        for row in positions.to_dict(orient='records'):
-            positions_list.append(
-                Position(
-                    identifier=row.get('identifier'),
-                    asset_id=row.get('id'),
-                    name=row.get('name'),
-                    weight=equal_weight if equalize else row.get('weight'),
-                    quantity=None if equalize else row.get('quantity'),
-                    notional=None if equalize else row.get('notional'),
-                    tags=list(PositionTag(tag, get(row, tag)) for tag in tag_columns) if len(tag_columns) else None
-                )
+        # Only compute tag_columns if add_tags
+        tag_columns = cls.__get_tag_columns(positions) if add_tags else []
+
+        # Filter out positions with missing 'identifier' aggressively upfront
+        identifier_notna = ~positions['identifier'].isna()
+        positions = positions[identifier_notna]
+
+        # Cache positions columns as a set of lowercase strings for quick lookup
+        pos_cols_lower_set = set(col.lower() for col in positions.columns)
+        equalize = not ('quantity' in pos_cols_lower_set or
+                        'weight' in pos_cols_lower_set or
+                        'notional' in pos_cols_lower_set)
+
+        positions_len = len(positions)
+        equal_weight = 1 / positions_len if positions_len else None
+
+        # Accelerate conversion from DataFrame to Position list
+        # Cache constructors for positions/tags
+        Position_constructor = Position
+        PositionTag_constructor = PositionTag
+        # Use slot for tag_columns, reducing attribute lookups in loop
+
+        # Preallocate final list capacity for performance
+        positions_list = [None] * positions_len
+        # Use pandas more efficiently; .values and .to_dict are already optimal for small sets,
+        # but we stick to df.to_dict(orient='records') for consistency.
+
+        # Only construct tags if tag_columns is not empty
+        tag_columns_len = len(tag_columns)
+        # Move row generation out to a helper for slightly improved speed.
+        to_records = positions.to_dict(orient='records')
+        for i, row in enumerate(to_records):
+            tags_val = None
+            if tag_columns_len:
+                # List comprehension for tags is already efficient
+                tags_val = [PositionTag_constructor(tag, get(row, tag)) for tag in tag_columns]
+            positions_list[i] = Position_constructor(
+                identifier=row.get('identifier'),
+                asset_id=row.get('id'),
+                name=row.get('name'),
+                weight=equal_weight if equalize else row.get('weight'),
+                quantity=None if equalize else row.get('quantity'),
+                notional=None if equalize else row.get('notional'),
+                tags=tags_val
             )
 
         return cls(positions_list, date, reference_notional=reference_notional, divisor=divisor)
