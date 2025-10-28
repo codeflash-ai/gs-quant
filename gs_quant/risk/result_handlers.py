@@ -28,22 +28,35 @@ _logger = logging.getLogger(__name__)
 
 def __dataframe_handler(result: Iterable, mappings: tuple, risk_key: RiskKey, request_id: Optional[str] = None) \
         -> DataFrameWithInfo:
-    first_row = next(iter(result), None)
-    if first_row is None:
+    result = list(result)  # Avoids repeated iteration and consumption
+    if not result:
         return DataFrameWithInfo(risk_key=risk_key, request_id=request_id)
 
-    columns = ()
-    indices = [False] * len(first_row.keys())
+    # Cache first row and all rows as dict for batch key lookup
+    first_row = result[0]
+    first_row_keys = tuple(first_row.keys())
     mappings_lookup = {v: k for k, v in mappings}
 
-    for idx, src in enumerate(first_row.keys()):
+    # Precompute columns and indices arrays with tight loops
+    columns_list = []
+    indices = []
+    for src in first_row_keys:
         if src in mappings_lookup:
-            indices[idx] = True
-            columns += ((mappings_lookup[src]),)
+            indices.append(True)
+            columns_list.append(mappings_lookup[src])
+        else:
+            indices.append(False)
+    columns = tuple(columns_list)
 
-    records = tuple(
-        sort_values((tuple(v for i, v in enumerate(r.values()) if indices[i]) for r in result), columns, columns)
-    )
+    # Precompute list of indexes for extraction to avoid enumerate at inner loop
+    use_indexes = [i for i, x in enumerate(indices) if x]
+
+    # Fast extraction loop: build tuples for records
+    # Avoid generator overhead for hot loop, use list comprehensions for speed
+    filtered_rows = [tuple(row[key] for key in first_row_keys if key in mappings_lookup) for row in result]
+
+    sorted_records = sort_values(filtered_rows, columns, columns)
+    records = tuple(sorted_records)
 
     df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
     df.columns = columns
@@ -400,23 +413,33 @@ def mmapi_pca_table_handler(result: dict, risk_key: RiskKey, _instrument: Instru
 
 def mmapi_pca_hedge_table_handler(result: dict, risk_key: RiskKey, _instrument: InstrumentBase,
                                   request_id: Optional[str] = None) -> DataFrameWithInfo:
-    coordinates = []
-    for r in result['rows']:
-        raw_point = r['coordinate'].get('point', '')
-        point = ';'.join(raw_point) if isinstance(raw_point, list) else raw_point
-        r['coordinate'].update({'point': point})
-        r['coordinate'].update({'size': r.get('size')})
-        r['coordinate'].update({'fixedRate': r.get('fixedRate')})
-        r['coordinate'].update({'irDelta': r.get('irDelta')})
-        coordinates.append(r['coordinate'])
-    mappings = (('mkt_type', 'type'),
-                ('mkt_asset', 'asset'),
-                ('mkt_class', 'assetClass'),
-                ('mkt_point', 'point'),
-                ('mkt_quoting_style', 'quotingStyle'),
-                ('size', 'size'),
-                ('fixedRate', 'fixedRate'),
-                ('irDelta', 'irDelta'))
+    # Pre-allocate list and local variables
+    rows = result['rows']
+    coordinates = [None] * len(rows)
+
+    # Build coordinates records with tight loop
+    for idx, r in enumerate(rows):
+        coord = r['coordinate']
+        raw_point = coord.get('point', '')
+        # Avoid repeated type checks, only transform if required
+        if isinstance(raw_point, list):
+            coord['point'] = ';'.join(raw_point)
+        # Always update keys directly instead of dict.update for fewer allocations
+        coord['size'] = r.get('size')
+        coord['fixedRate'] = r.get('fixedRate')
+        coord['irDelta'] = r.get('irDelta')
+        coordinates[idx] = coord
+
+    mappings = (
+        ('mkt_type', 'type'),
+        ('mkt_asset', 'asset'),
+        ('mkt_class', 'assetClass'),
+        ('mkt_point', 'point'),
+        ('mkt_quoting_style', 'quotingStyle'),
+        ('size', 'size'),
+        ('fixedRate', 'fixedRate'),
+        ('irDelta', 'irDelta'),
+    )
 
     return __dataframe_handler(coordinates, mappings, risk_key, request_id=request_id)
 
