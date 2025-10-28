@@ -268,13 +268,13 @@ def mean(x: Union[pd.Series, List[pd.Series]], w: Union[Window, int, str] = Wind
 
     If a timeseries is provided:
 
-    :math:`R_t = \\frac{\\sum_{i=t-w+1}^{t} X_i}{N}`
+    :math:`R_t = \frac{\sum_{i=t-w+1}^{t} X_i}{N}`
 
     where :math:`N` is the number of observations in each rolling window, :math:`w`.
 
     If an array of timeseries is provided:
 
-    :math:`R_t = \\frac{\\sum_{i=t-w+1}^{t} {\\sum_{j=1}^{n}} X_{ij}}{N}`
+    :math:`R_t = \frac{\sum_{i=t-w+1}^{t} {\sum_{j=1}^{n}} X_{ij}}{N}`
 
     where :math:`n` is the number of series, and :math:`N` is the number of observations in each rolling window,
     :math:`w`.
@@ -302,12 +302,25 @@ def mean(x: Union[pd.Series, List[pd.Series]], w: Union[Window, int, str] = Wind
         if isinstance(x, pd.Series):
             values = rolling_offset(x, w.w, np.nanmean, 'mean')
         else:
-            values = [np.nanmean(x.loc[(x.index > (idx - w.w).date()) & (x.index <= idx)]) for idx in x.index]
+            # Optimize DataFrame approach: vectorize the apply if possible
+            arr = x.values
+            out = np.empty(len(x))
+            for i, idx in enumerate(x.index):
+                mask = (x.index > (idx - w.w).date()) & (x.index <= idx)
+                window_arr = arr[mask]
+                out[i] = np.nanmean(window_arr)
+            values = pd.Series(out, index=x.index, dtype=float)
     else:
         if isinstance(x, pd.Series):
             values = x.rolling(w.w, 0).mean()  # faster than slicing in Python
         else:
-            values = [np.nanmean(x.iloc[max(idx - w.w + 1, 0): idx + 1]) for idx in range(0, len(x))]
+            # Vectorized rolling nanmean for DataFrame rows
+            # Compute the rolling sum and count for nanmean, avoiding Python slicing
+            df = x.copy()
+            rolling_sums = df.rolling(window=w.w, min_periods=1).sum()
+            rolling_counts = df.rolling(window=w.w, min_periods=1).count()
+            mean_vals = (rolling_sums.sum(axis=1)) / (rolling_counts.sum(axis=1))
+            values = mean_vals
     return apply_ramp(pd.Series(values, index=x.index, dtype=np.dtype(float)), w)
 
 
