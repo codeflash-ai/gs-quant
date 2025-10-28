@@ -95,15 +95,29 @@ class BacktestResult:
         return pd.DataFrame(data)
 
     def get_trade_history(self):
+        # Preallocate list for speed, avoid repeated concatenation
         data = []
+        append = data.append  # Localize for faster loop
+        
         for item in self._results.portfolio:
+            date = item['date']
             for transaction in item['transactions']:
-                trades = list(map(lambda x: dict(
-                    {'date': item['date'], 'quantity': x['quantity'], 'transactionType': transaction['type'],
-                     'price': x['price'], 'cost': transaction.get('cost') if len(transaction['trades']) == 1 else None},
-                    **x['instrument']), transaction['trades']))
-                data = data + trades
-
+                transaction_type = transaction['type']
+                trades_list = transaction['trades']
+                # Precompute cost if only one trade in this transaction
+                cost = transaction.get('cost') if len(trades_list) == 1 else None
+                for trade in trades_list:
+                    # Merge dictionaries directly for speed instead of map/lambda
+                    trade_row = {
+                        'date': date,
+                        'quantity': trade['quantity'],
+                        'transactionType': transaction_type,
+                        'price': trade['price'],
+                        'cost': cost,
+                        **trade['instrument']
+                    }
+                    append(trade_row)
+        # Construct DataFrame once the entire data is populated
         return pd.DataFrame(data)
 
 
