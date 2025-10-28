@@ -137,7 +137,12 @@ class Window:
 
     @classmethod
     def from_dict(cls, obj):
-        return Window(w=obj.get('w'), r=obj.get('r'))
+        # Fast-path: local var to avoid attribute lookups, pass args positionally
+        w = obj.get('w')
+        r = obj.get('r')
+        if r is None:
+            return cls(w)
+        return cls(w, r)
 
 
 def _check_window(series_length: int, window: Window):
