@@ -53,15 +53,39 @@ def __dataframe_handler(result: Iterable, mappings: tuple, risk_key: RiskKey, re
 
 def __dataframe_handler_unsorted(result: Iterable, mappings: tuple, date_cols: tuple, risk_key: RiskKey,
                                  request_id: Optional[str] = None) -> DataFrameWithInfo:
-    first_row = next(iter(result), None)
+    result_iter = iter(result)
+    first_row = next(result_iter, None)
     if first_row is None:
         return DataFrameWithInfo(risk_key=risk_key, request_id=request_id)
 
-    records = ([row.get(field_from) for field_to, field_from in mappings] for row in result)
+    # Build columns and date col set once
+    columns = [m[0] for m in mappings]
+    field_froms = [m[1] for m in mappings]
+    date_col_set = set(date_cols)
+
+    # Precompute which columns are date columns for fast lookup
+    date_col_indices = [i for i, col in enumerate(columns) if col in date_col_set]
+
+    # Prepare and reuse datetime.strptime
+    strptime = dt.datetime.strptime
+
+    # Prepare a function to parse only the required date columns
+    def process_row(row):
+        record = [row.get(field_from) for field_from in field_froms]
+        for idx in date_col_indices:
+            val = record[idx]
+            if isinstance(val, str):
+                # Avoids lambda in map for better perf, using fast local strptime
+                record[idx] = strptime(val, '%Y-%m-%d').date()
+        return record
+
+    # Start with the already captured first_row
+    records = [process_row(first_row)]
+    # Then process the rest
+    records.extend(process_row(row) for row in result_iter)
+
     df = DataFrameWithInfo(records, risk_key=risk_key, request_id=request_id)
-    df.columns = [m[0] for m in mappings]
-    for dt_col in date_cols:
-        df[dt_col] = df[dt_col].map(lambda x: dt.datetime.strptime(x, '%Y-%m-%d').date() if isinstance(x, str) else x)
+    df.columns = columns
 
     return df
 
