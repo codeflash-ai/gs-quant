@@ -1077,9 +1077,19 @@ class GsDataApi(DataApi):
             by: Tuple[str, ...] = ('date', 'time', 'mktType', 'mktAsset', 'mktClass',
                                    'mktPoint', 'mktQuotingStyle', 'value')
     ) -> pd.DataFrame:
-        columns = df.columns
-        field_order = [f for f in by if f in columns]
-        field_order.extend(f for f in columns if f not in field_order)
+        # Convert df.columns to a set for fast membership checks
+        columns_list = list(df.columns)
+        columns_set = set(columns_list)
+        by_order = [f for f in by if f in columns_set]
+
+        # Instead of scanning field_order repeatedly, use a set to avoid O(N^2) cost
+        field_order_set = set(by_order)
+        field_order = by_order + [f for f in columns_list if f not in field_order_set]
+
+        # Short-circuit if columns are already in order
+        if field_order == columns_list:
+            return df
+
         return df[field_order]
 
     @classmethod
