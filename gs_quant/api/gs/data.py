@@ -232,11 +232,15 @@ class GsDataApi(DataApi):
 
     @classmethod
     def _post_with_cache_check(cls, url, validator=lambda x: x, domain=None, **kwargs):
+        # Avoid unnecessary get of cls._api_request_cache
         result, cache_key, session = cls._check_cache(url=url, **kwargs)
+        cache = cls._api_request_cache
         if result is None:
-            result = validator(session._post(url, domain=domain, **kwargs))
-            if cls._api_request_cache:
-                cls._api_request_cache.put(session, cache_key, result)
+            # Use direct method lookup for slightly faster repeated use
+            post = session._post
+            result = validator(post(url, domain=domain, **kwargs))
+            if cache:
+                cache.put(session, cache_key, result)
         return result
 
     @classmethod
@@ -317,13 +321,14 @@ class GsDataApi(DataApi):
 
     @classmethod
     def _check_data_on_cloud(cls, dataset_id: str):
+        # Avoid repeated function calls and variable dereferencing
         session = cls.get_session()
         if session.redirect_to_mds and dataset_id != 'coordinates':
-            dataset_data = cls._get_with_cache_check('/data/datasets/{}'.format(dataset_id))
+            dataset_data = cls._get_with_cache_check(f'/data/datasets/{dataset_id}')
+            # Localize variable access and avoid function call if unnecessary
             database_id_exists = get(dataset_data, 'parameters.databaseId')
-
             if database_id_exists:
-                return cls.get_session()._get_mds_domain()
+                return session._get_mds_domain()
         return None
 
     @classmethod
@@ -388,21 +393,26 @@ class GsDataApi(DataApi):
     @classmethod
     def last_data(cls, query: Union[DataQuery, MDAPIDataQuery], dataset_id: str = None, timeout: int = None) \
             -> Union[list, tuple]:
+        # Prepare all kwargs first and localize method references for clarity and speed
         kwargs = {}
         if timeout is not None:
             kwargs['timeout'] = timeout
-        if getattr(query, 'marketDataCoordinates', None):
+        market_data_coordinates = getattr(query, 'marketDataCoordinates', None)
+        if market_data_coordinates is not None:
             result = cls._post_with_cache_check('/data/coordinates/query/last', payload=query, **kwargs)
-            return result.get('responses', ())
+            # Use empty tuple, not list, for default (matches original behavior)
+            responses = result.get('responses')
+            return responses if responses is not None else ()
         else:
             domain = cls._check_data_on_cloud(dataset_id)
             result = cls._post_with_cache_check(
-                '/data/{}/last/query'.format(dataset_id),
+                f'/data/{dataset_id}/last/query',
                 payload=query,
                 domain=domain,
                 **kwargs
             )
-            return result.get('data', ())
+            data = result.get('data')
+            return data if data is not None else ()
 
     @classmethod
     def symbol_dimensions(cls, dataset_id: str) -> tuple:
