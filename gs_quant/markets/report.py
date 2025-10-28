@@ -746,7 +746,7 @@ class PerformanceReport(Report):
         :return: aum source
         """
         portfolio = GsPortfolioApi.get_portfolio(self.position_source_id)
-        return portfolio.aum_source if portfolio.aum_source is not None else RiskAumSource.Long
+        return portfolio.aum_source or RiskAumSource.Long
 
     def set_aum_source(self,
                        aum_source: RiskAumSource):
