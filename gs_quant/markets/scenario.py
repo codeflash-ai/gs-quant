@@ -70,9 +70,10 @@ class FactorShock:
         self.__shock = shock
 
     def to_dict(self):
+        factor = self.__factor
         return {
-            "factor": self.factor.name if isinstance(self.factor, Factor) else self.factor,
-            "shock": self.shock
+            "factor": factor.name if isinstance(factor, Factor) else factor,
+            "shock": self.__shock
         }
 
     @classmethod
@@ -191,23 +192,29 @@ ScenarioParameters = Union[FactorShockParameters, HistoricalSimulationParameters
 class FactorScenario:
     """ Marquee Factor-based Scenario """
 
-    def __init__(self,
-                 name: str,
-                 type: Union[str, FactorScenarioType],
-                 parameters: Union[Dict, HistoricalSimulationParameters, FactorShockParameters],
-                 entitlements: Union[Dict, Entitlements] = None,
-                 id_: str = None,
-                 description: str = None,
-                 tags: List[str] = None):
+    def __init__(
+        self,
+        name: str,
+        type: Union[str, FactorScenarioType],
+        parameters: Union[Dict, HistoricalSimulationParameters, FactorShockParameters],
+        entitlements: Union[Dict, Entitlements] = None,
+        id_: str = None,
+        description: str = None,
+        tags: List[str] = None
+    ):
         self.__id = id_
         self.__name = name
         self.__type = type
         self.__description = description
-        self.__parameters = parameters \
-            if any([isinstance(parameters, FactorShockParameters),
-                    isinstance(parameters, HistoricalSimulationParameters)]) \
-            else FactorShockParameters.from_dict(parameters) if type == FactorScenarioType.Factor_Shock \
-            else HistoricalSimulationParameters.from_dict(parameters)
+
+        # Avoid unnecessary calls to isinstance and any
+        if isinstance(parameters, (FactorShockParameters, HistoricalSimulationParameters)):
+            self.__parameters = parameters
+        elif type == FactorScenarioType.Factor_Shock:
+            self.__parameters = FactorShockParameters.from_dict(parameters)
+        else:
+            self.__parameters = HistoricalSimulationParameters.from_dict(parameters)
+
         self.__entitlements = entitlements
         self.__tags = tags
 
@@ -285,13 +292,22 @@ class FactorScenario:
 
     @classmethod
     def from_dict(cls, scenario_as_dict: Dict) -> 'FactorScenario':
+        # Use direct dict access for native dicts for performance, avoid get() and pydash.get
+        # This assumes 'parameters' and 'entitlements' are at the top level as in the original code
+
+        # pydash.get offers deep extraction, but in this code, parameters/entitlements are always shallow
+        # (i.e. scenario_as_dict['parameters'], not nested), so direct access is safe for optimization
+
+        # No change in exceptions/behavior: KeyError can only happen if the key is missing 
+        # and we do not supply a default. We keep using dict.get(key, None).
         scenario_data = {
             "name": scenario_as_dict.get('name'),
             "description": scenario_as_dict.get('description'),
             "id_": scenario_as_dict.get('id'),
             "type": scenario_as_dict.get('type'),
-            "parameters": get(scenario_as_dict, 'parameters', None),
-            "entitlements": get(scenario_as_dict, 'entitlements', None),
+            # Replace pydash.get with direct get for shallow keys
+            "parameters": scenario_as_dict.get('parameters', None),
+            "entitlements": scenario_as_dict.get('entitlements', None),
             "tags": scenario_as_dict.get('tags')
         }
         return cls(**scenario_data)
