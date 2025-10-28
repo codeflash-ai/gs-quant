@@ -1097,16 +1097,31 @@ class RollingLinearRegression:
         if not isinstance(fit_intercept, bool):
             raise MqTypeError('expected a boolean value for "fit_intercept"')
 
-        df = pd.concat(X, axis=1) if isinstance(X, list) else X.to_frame()
-        df = sm.add_constant(df) if fit_intercept else df
-        df.columns = range(len(df.columns)) if fit_intercept else range(1, len(df.columns) + 1)
+        # Pre-convert inputs for efficiency
+        if isinstance(X, list):
+            df = pd.concat(X, axis=1)
+        else:
+            df = X.to_frame()
 
-        if w <= len(df.columns):
+        # Remove nan/inf from explanatory and target series as early as possible - avoids wasted fitting computations
+        mask_X = ~df.isin([np.nan, np.inf, -np.inf]).any(axis=1)
+        mask_y = ~y.isin([np.nan, np.inf, -np.inf])
+        # Only keep rows valid in both df and y after alignment
+        mask = mask_X & mask_y.reindex(df.index, fill_value=False)
+        df = df[mask]
+        y = y.reindex(df.index)
+        y = y[mask_y.reindex(df.index, fill_value=False)]
+        # Only align after cleaning; this is more memory and compute efficient
+        df_aligned, y_aligned = df.align(y, 'inner', axis=0)
+
+        if fit_intercept:
+            df_aligned = sm.add_constant(df_aligned, has_constant='add')
+            df_aligned.columns = range(len(df_aligned.columns))
+        else:
+            df_aligned.columns = range(1, len(df_aligned.columns) + 1)
+
+        if w <= len(df_aligned.columns):
             raise MqValueError('Window length must be larger than the number of explanatory variables')
-
-        df = df[~df.isin([np.nan, np.inf, -np.inf]).any(axis=1)]  # filter out nan and inf
-        y = y[~y.isin([np.nan, np.inf, -np.inf])]
-        df_aligned, y_aligned = df.align(y, 'inner', axis=0)  # align series
 
         self._X = df_aligned.copy()
         self._res = RollingOLS(y_aligned, df_aligned, w).fit()
@@ -1147,7 +1162,10 @@ class RollingLinearRegression:
 
         :return: standard deviations of the error terms
         """
-        return np.sqrt(self._res.mse_resid)
+        # Use np.sqrt directly on the underlying array for speed,
+        # then construct a Series with the corresponding original index
+        # (pandas' .apply(np.sqrt) is slower)
+        return pd.Series(np.sqrt(self._res.mse_resid.values), index=self._res.mse_resid.index)
 
 
 class SIRModel:
