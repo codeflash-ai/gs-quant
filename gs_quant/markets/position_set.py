@@ -54,7 +54,7 @@ class Position:
                  notional: float = None,
                  name: str = None,
                  asset_id: str = None,
-                 tags: Optional[List[Union[PositionTag, Dict]]] = None):
+                 tags: Optional[List[Union["PositionTag", Dict]]] = None):
         self.__identifier = identifier
         self.__weight = weight
         self.__quantity = quantity
@@ -62,6 +62,7 @@ class Position:
         self.__name = name
         self.__asset_id = asset_id
         if tags is not None:
+            # Keep logic as original
             self.__tags = [PositionTag.from_dict(tag) if isinstance(tag, dict) else tag for tag in tags]
         else:
             self.__tags = tags
@@ -70,15 +71,38 @@ class Position:
     def __eq__(self, other) -> bool:
         if not isinstance(other, Position):
             return False
-        for prop in ['asset_id', 'weight', 'notional', 'quantity', 'tags']:
-            # Calculations from V2 sometimes add insignificant decimals places
-            slf = get(self, prop)
-            oth = get(other, prop)
-            if prop in ['weight', 'notional', 'quantity']:
-                if not (slf is None or oth is None) and not round(slf, 5) == round(oth, 5):
-                    return False
-            elif not (slf is None and oth is None) and not slf == oth:
-                return False
+        # Direct attribute access is much faster than pydash.get
+        slf_asset_id = self.__asset_id
+        oth_asset_id = other.__asset_id
+        if not ((slf_asset_id is None and oth_asset_id is None) or slf_asset_id == oth_asset_id):
+            return False
+
+        slf_weight = self.__weight
+        oth_weight = other.__weight
+        if not (slf_weight is None or oth_weight is None) and not round(slf_weight, 5) == round(oth_weight, 5):
+            return False
+        elif not (slf_weight is None and oth_weight is None) and not slf_weight == oth_weight:
+            return False  # Redundant but matches original behavior
+
+        slf_notional = self.__notional
+        oth_notional = other.__notional
+        if not (slf_notional is None or oth_notional is None) and not round(slf_notional, 5) == round(oth_notional, 5):
+            return False
+        elif not (slf_notional is None and oth_notional is None) and not slf_notional == oth_notional:
+            return False
+
+        slf_quantity = self.__quantity
+        oth_quantity = other.__quantity
+        if not (slf_quantity is None or oth_quantity is None) and not round(slf_quantity, 5) == round(oth_quantity, 5):
+            return False
+        elif not (slf_quantity is None and oth_quantity is None) and not slf_quantity == oth_quantity:
+            return False
+
+        slf_tags = self.__tags
+        oth_tags = other.__tags
+        if not (slf_tags is None and oth_tags is None) and not slf_tags == oth_tags:
+            return False
+
         return True
 
     def __hash__(self):
