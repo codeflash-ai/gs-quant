@@ -164,16 +164,19 @@ class Basket(Asset, PositionedEntity):
         :func:`get_details` :func:`poll_status` :func:`update`
 
         """
-        inputs, pricing, publish = {}, {}, {}
-        for prop in CustomBasketsCreateInputs.properties():
-            set_(inputs, prop, get(self, prop))
-        for prop in CustomBasketsPricingParameters.properties():
-            set_(pricing, prop, get(self, prop))
-        for prop in PublishParameters.properties():
-            set_(publish, prop, get(self, prop))
-        set_(inputs, 'position_set', self.position_set.to_target(common=False))
-        set_(inputs, 'pricing_parameters', CustomBasketsPricingParameters(**pricing))
-        set_(inputs, 'publish_parameters', PublishParameters(**publish))
+        # Cache the property sets before use
+        cbci_props = CustomBasketsCreateInputs.properties()
+        cbpp_props = CustomBasketsPricingParameters.properties()
+        pp_props = PublishParameters.properties()
+
+        # Build input/pricing/publish dicts using comprehensions for efficiency
+        inputs = {prop: get(self, prop) for prop in cbci_props}
+        pricing = {prop: get(self, prop) for prop in cbpp_props}
+        publish = {prop: get(self, prop) for prop in pp_props}
+
+        inputs['position_set'] = self.position_set.to_target(common=False)
+        inputs['pricing_parameters'] = CustomBasketsPricingParameters(**pricing)
+        inputs['publish_parameters'] = PublishParameters(**publish)
         create_inputs = CustomBasketsCreateInputs(**inputs)
 
         response = GsIndexApi.create(create_inputs)

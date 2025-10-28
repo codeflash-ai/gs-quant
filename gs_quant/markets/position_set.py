@@ -215,12 +215,12 @@ class PositionSet:
     """
 
     def __init__(self,
-                 positions: List[Position],
+                 positions: List['Position'],
                  date: dt.date = dt.date.today(),
                  divisor: float = None,
                  reference_notional: float = None,
-                 unresolved_positions: List[Position] = None,
-                 unpriced_positions: List[Position] = None):
+                 unresolved_positions: List['Position'] = None,
+                 unpriced_positions: List['Position'] = None):
         if reference_notional is not None:
             for p in positions:
                 if p.weight is None:
@@ -867,8 +867,13 @@ class PositionSet:
 
     def to_target(self, common: bool = True) -> Union[CommonPositionSet, List[PositionPriceInput]]:
         """ Returns PostionSet type defined in target file for API payloads """
-        positions = tuple(p.to_target(common) for p in self.positions)
-        return CommonPositionSet(positions, self.date) if common else list(positions)
+        if common:
+            # Use tuple generator expression directly
+            positions_tuple = tuple(p.to_target(common) for p in self.positions)
+            return CommonPositionSet(positions_tuple, self.date)
+        else:
+            # Use list comprehension directly, efficient for lists
+            return [p.to_target(common) for p in self.positions]
 
     @classmethod
     def from_target(cls, position_set: CommonPositionSet):
