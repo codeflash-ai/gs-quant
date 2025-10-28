@@ -207,11 +207,9 @@ def fixing_table_handler(result: dict, risk_key: RiskKey, _instrument: Instrumen
                          request_id: Optional[str] = None) -> SeriesWithInfo:
     rows = result['fixingTableRows']
 
-    dates = []
-    values = []
-    for row in rows:
-        dates.append(dt.date.fromisoformat(row["fixingDate"]))
-        values.append(row["fixing"])
+    fromisoformat = dt.date.fromisoformat
+    dates = [fromisoformat(row["fixingDate"]) for row in rows]
+    values = [row["fixing"] for row in rows]
 
     return SeriesWithInfo(values, index=dates, risk_key=risk_key, request_id=request_id)
 
