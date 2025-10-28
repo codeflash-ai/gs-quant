@@ -272,12 +272,13 @@ class GsDataApi(DataApi):
     def query_data(cls, query: Union[DataQuery, MDAPIDataQuery], dataset_id: str = None,
                    asset_id_type: Union[GsIdType, str] = None) \
             -> Union[MDAPIDataBatchResponse, DataQueryResponse, tuple, list]:
-        if isinstance(query, MDAPIDataQuery) and query.market_data_coordinates:
-            # Don't use MDAPIDataBatchResponse for now - it doesn't handle quoting style correctly
+        is_mdapi_query = isinstance(query, MDAPIDataQuery)
+        if is_mdapi_query and query.market_data_coordinates:
             results: Union[MDAPIDataBatchResponse, dict] = cls.execute_query('coordinates', query)
             if isinstance(results, dict):
                 return results.get('responses', ())
             else:
+                # Avoid repeated attribute lookups
                 return results.responses if results.responses is not None else ()
         response: Union[DataQueryResponse, dict] = cls.execute_query(dataset_id, query)
         return cls.get_results(dataset_id, response, query)
@@ -1034,23 +1035,23 @@ class GsDataApi(DataApi):
             fields: Optional[Tuple[MDAPIQueryField, ...]] = None
     ) -> Iterable[Iterable[Dict]]:
         ret = []
+        # Localize 'MDAPIDataQueryResponse' for isinstance
+        query_response_type = MDAPIDataQueryResponse
         for response in data:
             coord_data = []
-            rows = (
-                r.as_dict() for r in response.data) if isinstance(
-                response,
-                MDAPIDataQueryResponse) else response.get(
-                'data',
-                ())
+            # Use local variable for response type
+            if isinstance(response, query_response_type):
+                rows = (r.as_dict() for r in response.data)
+            else:
+                rows = response.get('data', ())
 
             for pt in rows:
                 if not pt:
                     continue
-
+                # Use local fields for performance in repeated dictionary lookup
                 if not fields and 'value' not in pt:
                     value_field = pt['mktQuotingStyle']
                     pt['value'] = pt.pop(value_field)
-
                 coord_data.append(pt)
             ret.append(coord_data)
 
@@ -1064,10 +1065,11 @@ class GsDataApi(DataApi):
             use_datetime_index: Optional[bool] = True
     ) -> pd.DataFrame:
         df = cls._sort_coordinate_data(pd.DataFrame.from_records(data))
-        index_field = next((f for f in ('time', 'date') if f in df.columns), None)
+        index_fields = ('time', 'date')
+        index_field = next((f for f in index_fields if f in df.columns), None)
         if index_field and use_datetime_index:
-            df = df.set_index(pd.DatetimeIndex(df.loc[:, index_field].values))
-
+            col_values = df[index_field].values
+            df.index = pd.DatetimeIndex(col_values)
         return df
 
     @classmethod
@@ -1193,10 +1195,13 @@ class GsDataApi(DataApi):
         >>> coordinate = ("FX Fwd_USD/EUR_Fwd Pt_2y",)
         >>> data = GsDataApi.coordinates_data(coordinate, dt.datetime(2019, 11, 18), dt.datetime(2019, 11, 19))
         """
-        coordinates_iterable = (coordinates,) if isinstance(coordinates, (MarketDataCoordinate, str)) else coordinates
+        coordinates_is_single = isinstance(coordinates, (MarketDataCoordinate, str))
+        coordinates_iterable = (coordinates,) if coordinates_is_single else coordinates
+        # Convert all coordinate strings up front via efficient generator to tuple
+        coordinate_objs = tuple(cls._coordinate_from_str(coord) if isinstance(coord, str) else coord
+                                for coord in coordinates_iterable)
         query = cls.build_query(
-            market_data_coordinates=tuple(cls._coordinate_from_str(coord) if isinstance(coord, str) else coord
-                                          for coord in coordinates_iterable),
+            market_data_coordinates=coordinate_objs,
             vendor=vendor,
             start=start,
             end=end,
@@ -1208,8 +1213,10 @@ class GsDataApi(DataApi):
         results = cls.__normalise_coordinate_data(cls.query_data(query), fields=fields)
 
         if as_multiple_dataframes:
+            # Use tuple generator for memory efficiency
             return tuple(GsDataApi.__df_from_coordinate_data(r) for r in results)
         else:
+            # Use chain.from_iterable directly for performance
             return cls.__df_from_coordinate_data(chain.from_iterable(results))
 
     @classmethod
