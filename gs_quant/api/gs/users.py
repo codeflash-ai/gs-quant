@@ -24,23 +24,28 @@ from gs_quant.target.reports import User
 
 class GsUsersApi:
     @classmethod
-    def get_users(cls,
-                  user_ids: List[str] = None,
-                  user_emails: List[str] = None,
-                  user_names: List[str] = None,
-                  user_companies: List[str] = None,
-                  limit: int = 100,
-                  offset: int = 0) -> List:
-        url = '/users?'
+    def get_users(
+        cls,
+        user_ids: List[str] = None,
+        user_emails: List[str] = None,
+        user_names: List[str] = None,
+        user_companies: List[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List:
+        # Efficient URL building using list and join
+        url_parts = ["/users?"]
         if user_ids:
-            url += f'&id={"&id=".join(user_ids)}'
+            url_parts.append("&id=" + "&id=".join(user_ids))
         if user_emails:
-            url += f'&email={"&email=".join(user_emails)}'
+            url_parts.append("&email=" + "&email=".join(user_emails))
         if user_names:
-            url += f'&name={"&name=".join(user_names)}'
+            url_parts.append("&name=" + "&name=".join(user_names))
         if user_companies:
-            url += f'&company={"&company=".join(user_companies)}'
-        return GsSession.current._get(f'{url}&limit={limit}&offset={offset}', cls=User)['results']
+            url_parts.append("&company=" + "&company=".join(user_companies))
+        url_parts.append(f"&limit={limit}&offset={offset}")
+        url = "".join(url_parts)
+        return GsSession.current._get(url, cls=User)["results"]
 
     @classmethod
     def get_my_guid(cls) -> str:
@@ -52,8 +57,11 @@ class GsUsersApi:
         Gets user
         :return: user
         """
-        return GsSession.current._get('/users/self')
+        return GsSession.current._get("/users/self")
 
     @classmethod
     def get_current_app_managers(cls) -> List[str]:
-        return [f"guid:{manager}" for manager in get(GsSession.current._get('/users/self'), 'appManagers', [])]
+        return [
+            f"guid:{manager}"
+            for manager in get(GsSession.current._get("/users/self"), "appManagers", [])
+        ]
