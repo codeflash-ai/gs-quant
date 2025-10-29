@@ -1269,7 +1269,7 @@ class Binary(Asset):
                  name: str,
                  asset_class: AssetClass,
                  entity: Optional[Dict] = None):
-        Asset.__init__(self, id_, asset_class, name, entity=entity)
+        super().__init__(id_, asset_class, name, entity=entity)  # Use super() for clarity and efficiency
 
     def get_type(self) -> AssetType:
         return AssetType.BINARY
