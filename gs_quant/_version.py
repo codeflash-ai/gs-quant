@@ -1,4 +1,3 @@
-
 # This file helps to compute a version number in source trees obtained from
 # git-archive tarball (such as those provided by githubs download-from-tag
 # feature). Distribution tarballs (built by setup.py sdist) and build
@@ -364,7 +363,7 @@ def git_pieces_from_vcs(tag_prefix, root, verbose, runner=run_command):
 
 def plus_or_dot(pieces):
     """Return a + if we don't already have one, else return a ."""
-    if "+" in pieces.get("closest-tag", ""):
+    if "+" in pieces["closest-tag"]:
         return "."
     return "+"
 
@@ -493,23 +492,32 @@ def render_pep440_post_branch(pieces):
     Exceptions:
     1: no tags. 0.postDISTANCE[.dev0]+gHEX[.dirty]
     """
-    if pieces["closest-tag"]:
-        rendered = pieces["closest-tag"]
-        if pieces["distance"] or pieces["dirty"]:
-            rendered += ".post%d" % pieces["distance"]
-            if pieces["branch"] != "master":
+    # Local references to frequently used variables to optimize attribute and indexing access
+    closest_tag = pieces["closest-tag"]
+    distance = pieces["distance"]
+    dirty = pieces["dirty"]
+    branch = pieces["branch"]
+    short = pieces["short"]
+
+    if closest_tag:
+        # Precompute if post-needed, avoids repeated checks
+        post_needed = distance or dirty
+        rendered = closest_tag
+        if post_needed:
+            rendered += f".post{distance}"
+            if branch != "master":
                 rendered += ".dev0"
             rendered += plus_or_dot(pieces)
-            rendered += "g%s" % pieces["short"]
-            if pieces["dirty"]:
+            rendered += f"g{short}"
+            if dirty:
                 rendered += ".dirty"
     else:
         # exception #1
-        rendered = "0.post%d" % pieces["distance"]
-        if pieces["branch"] != "master":
+        rendered = f"0.post{distance}"
+        if branch != "master":
             rendered += ".dev0"
-        rendered += "+g%s" % pieces["short"]
-        if pieces["dirty"]:
+        rendered += f"+g{short}"
+        if dirty:
             rendered += ".dirty"
     return rendered
 
