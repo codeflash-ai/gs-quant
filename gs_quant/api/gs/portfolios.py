@@ -82,7 +82,7 @@ class GsPortfolioApi(ApiWithCustomSession):
 
     @classmethod
     def update_portfolio(cls, portfolio: Portfolio):
-        return GsSession.current._put('/portfolios/{id}'.format(id=portfolio.id), portfolio, cls=Portfolio)
+        return GsSession.current._put(f'/portfolios/{portfolio.id}', portfolio, cls=Portfolio)
 
     @classmethod
     def delete_portfolio(cls, portfolio_id: str) -> dict:
