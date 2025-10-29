@@ -32,6 +32,10 @@ from gs_quant.json_convertors_common import encode_risk_measure, decode_risk_mea
 from gs_quant.priceable import PriceableImpl
 from gs_quant.target.backtests import FlowVolBacktestMeasure
 
+_CURRENCY_VALUES = {x.value for x in Currency}
+
+_CURRENCYNAME_VALUES = {x.value for x in CurrencyName}
+
 
 def encode_response_obj(data: Any) -> Dict:
     if isinstance(data, RiskMeasure):
@@ -62,16 +66,16 @@ def decode_basic_bt_measure_dict(results: dict) -> Dict[FlowVolBacktestMeasure, 
 
 def decode_basic_bt_transactions(results: dict, decode_instruments: bool = True) -> \
         Dict[dt.date, Tuple[Transaction, ...]]:
-    def to_ccy(s: str) -> Union[Currency, CurrencyName, str]:
-        if s in [x.value for x in Currency]:
-            return Currency(s)
-        elif s in [x.value for x in CurrencyName]:
-            return CurrencyName(s)
-        else:
-            return s
-
     return {dt.date.fromisoformat(k): tuple(
             Transaction(decode_inst_tuple(t['portfolio']) if decode_instruments else t['portfolio'],
                         t.get('portfolio_price'), t.get('cost'), to_ccy(t['currency']) if t.get('currency') else None,
                         TransactionDirection(t['direction']) if t.get('direction') else None, t.get('quantity'))
             for t in v) for k, v in results.items()}
+
+def to_ccy(s: str) -> Union[Currency, CurrencyName, str]:
+    if s in _CURRENCY_VALUES:
+        return Currency(s)
+    elif s in _CURRENCYNAME_VALUES:
+        return CurrencyName(s)
+    else:
+        return s
