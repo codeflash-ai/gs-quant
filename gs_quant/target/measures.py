@@ -34,7 +34,10 @@ class RiskMeasureWithCurrencyParameter(ParameterisedRiskMeasure):
         if isinstance(currency, (pd.Series, pd.DataFrame)):
             return self
 
-        clone = copy.copy(self)
+        cls = type(self)
+        clone = cls.__new__(cls)
+        clone.__dict__.update(self.__dict__)
+
         if name:
             clone.name = name
 
