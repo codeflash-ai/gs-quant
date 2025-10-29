@@ -216,7 +216,7 @@ class Group:
         """
         group_ids = group_ids if group_ids else []
         names = names if names else []
-        if not group_ids + names:
+        if not group_ids and not names:
             return []
         group_ids = [id_[6:] if id_.startswith('group:') else id_ for id_ in group_ids]
         results = GsGroupsApi.get_groups(ids=group_ids,
