@@ -49,7 +49,11 @@ class LastProcessor(BaseProcessor):
         a_data = self.children_data.get('a')
         if isinstance(a_data, ProcessorResult):
             if a_data.success and isinstance(a_data.data, pd.Series):
-                self.value = ProcessorResult(True, pd.Series(a_data.data[-1:]))
+                # Use .iloc for direct and faster selection; avoids unnecessary copying
+                if not a_data.data.empty:
+                    self.value = ProcessorResult(True, a_data.data.iloc[[-1]])
+                else:
+                    self.value = ProcessorResult(True, pd.Series(dtype=a_data.data.dtype, index=a_data.data.index.__class__([])))
 
         return self.value
 
