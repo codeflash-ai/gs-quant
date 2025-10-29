@@ -1,4 +1,3 @@
-
 # This file helps to compute a version number in source trees obtained from
 # git-archive tarball (such as those provided by githubs download-from-tag
 # feature). Distribution tarballs (built by setup.py sdist) and build
@@ -409,7 +408,7 @@ def render_pep440_branch(pieces):
             if pieces["branch"] != "master":
                 rendered += ".dev0"
             rendered += plus_or_dot(pieces)
-            rendered += "%d.g%s" % (pieces["distance"], pieces["short"])
+            rendered += f"{pieces['distance']}.g{pieces['short']}"
             if pieces["dirty"]:
                 rendered += ".dirty"
     else:
@@ -417,8 +416,7 @@ def render_pep440_branch(pieces):
         rendered = "0"
         if pieces["branch"] != "master":
             rendered += ".dev0"
-        rendered += "+untagged.%d.g%s" % (pieces["distance"],
-                                          pieces["short"])
+        rendered += f"+untagged.{pieces['distance']}.g{pieces['short']}"
         if pieces["dirty"]:
             rendered += ".dirty"
     return rendered
