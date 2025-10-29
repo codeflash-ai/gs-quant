@@ -1632,14 +1632,17 @@ def get_thematic_breakdown_as_df(entity_id: str,
                                           end_date=date,
                                           basket_ids=[basket_id],
                                           measures=[ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET])
-    breakdown = results[0].get(
-        ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET.value, [{}])[0].get(
-        ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET.value, []
-    )
-    formatted_breakdown = []
-    for data in breakdown:
-        formatted_data = {titleize(k): data[k] for k in data}
-        formatted_breakdown.append(formatted_data)
+    try:
+        breakdown = results[0][ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET.value][0][ThematicMeasure.THEMATIC_BREAKDOWN_BY_ASSET.value]
+    except (IndexError, KeyError, TypeError):
+        breakdown = []
+
+    if not breakdown:
+        return pd.DataFrame()
+
+    keys = list(breakdown[0].keys())
+    titled_keys = [titleize(k) for k in keys]
+    formatted_breakdown = [{titled_keys[i]: row[k] for i, k in enumerate(keys)} for row in breakdown]
     return pd.DataFrame(formatted_breakdown)
 
 
