@@ -505,23 +505,30 @@ class BenchmarkType(Enum):
 def _check_benchmark_type(currency, benchmark_type: Union[BenchmarkType, str], nothrow: bool = False) \
         -> Union[BenchmarkType, str]:
     if isinstance(benchmark_type, str):
-        if benchmark_type.upper() in BenchmarkType.__members__:
-            benchmark_type = BenchmarkType[benchmark_type.upper()]
-        elif benchmark_type in ['fed_funds', 'Fed_Funds', 'FED_FUNDS']:
+        upper_benchmark = benchmark_type.upper()
+        # Fast-path for most-used lookups
+        members = BenchmarkType.__members__
+        if upper_benchmark in members:
+            benchmark_type = members[upper_benchmark]
+        elif upper_benchmark in ('FED_FUNDS',):
             benchmark_type = BenchmarkType.Fed_Funds
-        elif benchmark_type in ['estr', 'ESTR', 'eurostr', 'EuroStr']:
+        elif upper_benchmark in ('ESTR', 'EUROSTR'):
             benchmark_type = BenchmarkType.EUROSTR
         elif not nothrow:
-            raise MqValueError(f'{benchmark_type} is not valid, pick one among ' +
-                               ', '.join([x.value for x in BenchmarkType]))
+            raise MqValueError(
+                f'{benchmark_type} is not valid, pick one among ' +
+                ', '.join(x.value for x in BenchmarkType)
+            )
         else:
             return benchmark_type
 
-    if isinstance(benchmark_type, BenchmarkType) and \
-            benchmark_type.value not in CURRENCY_TO_SWAP_RATE_BENCHMARK[currency.value].keys():
-        raise MqValueError(f'{benchmark_type.value} is not supported for {currency.value}')
-    else:
-        return benchmark_type
+    if isinstance(benchmark_type, BenchmarkType):
+        currency_val = currency.value
+        # Access once
+        available_keys = CURRENCY_TO_SWAP_RATE_BENCHMARK[currency_val]
+        if benchmark_type.value not in available_keys:
+            raise MqValueError(f'{benchmark_type.value} is not supported for {currency_val}')
+    return benchmark_type
 
 
 def _check_clearing_house(clearing_house: Union[_ClearingHouse, str]) -> _ClearingHouse:
