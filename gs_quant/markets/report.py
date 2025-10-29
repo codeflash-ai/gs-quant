@@ -1733,9 +1733,10 @@ def __smooth_percent_returns(daily_factor_returns: np.array, daily_total_returns
     For this use case benchmark returns are set to 0 for every day.
     """
     total_return = np.prod(daily_total_returns + 1) - 1
-    log_scaling_factor = total_return / (np.log(1 + total_return)) if total_return != 0 else 1
-    perturbation_factors = np.log(1 + daily_total_returns) / daily_total_returns
-    perturbation_factors = np.nan_to_num(perturbation_factors, nan=1)
+    log_scaling_factor = total_return / np.log1p(total_return) if total_return != 0 else 1
+    with np.errstate(divide='ignore', invalid='ignore'):
+        perturbation_factors = np.log1p(daily_total_returns) / daily_total_returns
+    perturbation_factors = np.where(np.isfinite(perturbation_factors), perturbation_factors, 1)
     return np.cumsum(daily_factor_returns * log_scaling_factor * perturbation_factors * 100)
 
 
