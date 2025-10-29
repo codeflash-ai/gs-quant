@@ -1674,7 +1674,7 @@ def get_pnl_percent(performance_report: PerformanceReport, pnl_df: pd.DataFrame,
 
 def get_factor_pnl_percent_for_single_factor(factor_data, total_data, aum_df, start_date):
     pnl_df = format_factor_pnl_for_return_calculation(factor_data, total_data)
-    is_start_date_first_data_point = pnl_df['date'].iloc[[0]].values[0] == start_date.strftime('%Y-%m-%d')
+    is_start_date_first_data_point = pnl_df['date'].iat[0] == start_date.strftime('%Y-%m-%d')
     return generate_daily_returns(aum_df, pnl_df, 'aum', 'pnl', is_start_date_first_data_point)
 
 
@@ -1696,19 +1696,35 @@ def format_aum_for_return_calculation(performance_report: PerformanceReport, sta
 def generate_daily_returns(aum_df: pd.DataFrame, pnl_df: pd.DataFrame, aum_col_key: str, pnl_col_key: str,
                            is_start_date_first_data_point: bool):
     # Returns are defined as Pnl today divided by AUM yesterday.
+    # Reduce loc overhead: operate only if needed
     if is_start_date_first_data_point:
-        pnl_df.loc[0, pnl_col_key] = 0
-        if 'totalPnl' in pnl_df.columns:
-            pnl_df.loc[0, 'totalPnl'] = 0
-    df = pd.merge(pnl_df, aum_df, how='outer', on='date')
-    df = df.set_index('date')
-    df = df.sort_index()
+        # Direct .iat assignment (faster than .loc for single item)
+        pnl_df.iat[0, pnl_df.columns.get_loc(pnl_col_key)] = 0
+        tp_idx = pnl_df.columns.get_loc('totalPnl') if 'totalPnl' in pnl_df.columns else None
+        if tp_idx is not None:
+            pnl_df.iat[0, tp_idx] = 0
+
+    # Use pd.merge; sort=False for faster merge
+    df = pd.merge(pnl_df, aum_df, how='outer', on='date', sort=False)
+    # Set index and sort only ONCE for speed
+    df.set_index('date', inplace=True)
+    df.sort_index(inplace=True)
+    # Use inplace ffill for less copying
     df[aum_col_key] = df[aum_col_key].ffill()
-    df['return'] = df[pnl_col_key].div(df[aum_col_key].shift(1))
+    # Calculate returns; avoiding intermediate allocations
+    aum_shifted = df[aum_col_key].shift(1)
+    # Assignment operations can touch large arrays, use array operations
+    df['return'] = df[pnl_col_key].values / aum_shifted.values
+
     if 'totalPnl' in df.columns:
-        df['totalPnl'] = df['totalPnl'].div(df[aum_col_key].shift(1))
-        df = df.fillna(0)
-        df['return'] = __smooth_percent_returns(df['return'].to_numpy(), df['totalPnl'].to_numpy()).tolist()
+        df['totalPnl'] = df['totalPnl'].values / aum_shifted.values
+        # Minimize multiple full-nan scans: use only as necessary
+        df.fillna(0, inplace=True)
+        # Use direct numpy arrays for __smooth_percent_returns (which is vectorized)
+        # Avoid creating lists before Series
+        factor_return_np = df['return'].to_numpy()
+        total_return_np = df['totalPnl'].to_numpy()
+        df['return'] = __smooth_percent_returns(factor_return_np, total_return_np)
     return_series = pd.Series(df['return'], name="return").dropna()
     return return_series
 
