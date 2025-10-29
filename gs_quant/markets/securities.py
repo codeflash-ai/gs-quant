@@ -1962,7 +1962,9 @@ class SecurityMaster:
                 if params['offset'] + params['limit'] > 10000:
                     _logger.warning('reached result size limit; enable use of offset keys to retrieve all results')
                     return
-            time.sleep(sleep)
+            # Skip sleep if only one page of results
+            if r['totalResults'] > cls._page_size:
+                time.sleep(sleep)
 
     @classmethod
     def get_all_identifiers(cls, class_: AssetClass = None, types: Optional[List[AssetType]] = None,
@@ -1981,12 +1983,11 @@ class SecurityMaster:
         """
         gen = cls.get_all_identifiers_gen(class_, types, as_of, id_type=id_type, use_offset_key=use_offset_key,
                                           sleep=sleep)
-        accumulator = dict()
-        while True:
-            try:
-                accumulator.update(next(gen))
-            except StopIteration:
-                return accumulator
+        accumulator = {}
+        # Slightly optimized next/StopIteration block
+        for result in gen:
+            accumulator.update(result)
+        return accumulator
 
     @classmethod
     def map_identifiers(
