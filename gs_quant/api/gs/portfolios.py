@@ -91,7 +91,7 @@ class GsPortfolioApi(ApiWithCustomSession):
     # manage portfolio positions
     @classmethod
     def get_portfolio_analyze(cls, portfolio_id: str) -> dict:
-        url = '/portfolios/{id}/analyze'.format(id=portfolio_id)
+        url = f'/portfolios/{portfolio_id}/analyze'
         res = GsSession.current._get(url)
         return res
 
