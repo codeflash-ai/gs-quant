@@ -784,17 +784,21 @@ class Hedge:
 
     @staticmethod
     def _format_hedge_calculate_results(calculation_results):
+        # Avoid repeated dict .get lookups with local variable
+        target = calculation_results.get('target')
+        hedge = calculation_results.get('hedge')
+        hedged_target = calculation_results.get('hedgedTarget')
         renamed_results = {
-            'Portfolio': calculation_results.get('target'),
-            'Hedge': calculation_results.get('hedge'),
-            'Hedged Portfolio': calculation_results.get('hedgedTarget')
+            'Portfolio': target,
+            'Hedge': hedge,
+            'Hedged Portfolio': hedged_target
         }
 
-        formatted_results = {}
-        for key in renamed_results:
-            formatted_results[key] = Hedge.format_dictionary_key_to_readable_format(renamed_results[key])
-
-        return formatted_results
+        # Use dict comprehension for efficiency and clarity
+        return {
+            key: Hedge.format_dictionary_key_to_readable_format(renamed_results[key])
+            for key in renamed_results
+        }
 
     @staticmethod
     def _enhance_result_with_benchmark_curves(formatted_results, benchmark_results, resolver):
@@ -812,10 +816,23 @@ class Hedge:
 
     @staticmethod
     def format_dictionary_key_to_readable_format(renamed_results):
+        # Assume renamed_results is a dict with string keys
+        # Avoid map/lambda and string concatenation in a loop, precompute substrings
         formatted_results = {}
         for inner_key in renamed_results:
-            formatted_results[inner_key[0].capitalize() + ''.join(map(lambda x: x if x.islower() else f' {x}',
-                                                                      inner_key[1:]))] = renamed_results[inner_key]
+            # Find index positions of uppercase letters (except the first character)
+            key = inner_key
+            # Preallocate string build to avoid repeated concatenation and function calls
+            readable = key[0].capitalize()
+            buffer = []
+            for c in key[1:]:
+                if c.islower():
+                    buffer.append(c)
+                else:
+                    buffer.append(' ')
+                    buffer.append(c)
+            formatted_key = readable + ''.join(buffer)
+            formatted_results[formatted_key] = renamed_results[inner_key]
         return formatted_results
 
     @staticmethod
