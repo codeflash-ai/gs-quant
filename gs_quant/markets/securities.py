@@ -50,6 +50,8 @@ from gs_quant.session import GsSession
 from gs_quant.target.data import DataQuery
 from gs_quant.tracing import Tracer
 
+_COMMOD_POWER_AGG_NODES_TYPE = None
+
 _logger = logging.getLogger(__name__)
 
 
@@ -1067,7 +1069,11 @@ class CommodityPowerAggregatedNodes(Asset):
         Asset.__init__(self, id_, AssetClass.Commod, name, entity=entity)
 
     def get_type(self) -> AssetType:
-        return AssetType.COMMODITY_POWER_AGGREGATED_NODES
+        global _COMMOD_POWER_AGG_NODES_TYPE
+        # Lazy initialization and caching of enum value for faster returning
+        if _COMMOD_POWER_AGG_NODES_TYPE is None:
+            _COMMOD_POWER_AGG_NODES_TYPE = AssetType.COMMODITY_POWER_AGGREGATED_NODES
+        return _COMMOD_POWER_AGG_NODES_TYPE
 
 
 class Commodity(Asset):
