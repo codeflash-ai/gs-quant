@@ -978,7 +978,7 @@ class Hedge:
         :param curr_weight: float, the weighting of the corresponding asset (of the entire portfolio) on the current day
         :return: float, the net notional amount of the asset traded on the current day
         """
-        return sum([np.abs(curr_weight - prev_weight) * notional_on_the_day])
+        return np.abs(curr_weight - prev_weight) * notional_on_the_day
 
     @staticmethod
     def compute_tcosts(basis_points, asset_weights, asset_notionals, backtest_dates, portfolio_asset_ids):
