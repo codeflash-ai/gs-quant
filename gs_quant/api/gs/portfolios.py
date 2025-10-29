@@ -86,7 +86,7 @@ class GsPortfolioApi(ApiWithCustomSession):
 
     @classmethod
     def delete_portfolio(cls, portfolio_id: str) -> dict:
-        return GsSession.current._delete('/portfolios/{id}'.format(id=portfolio_id))
+        return GsSession.current._delete(f'/portfolios/{portfolio_id}')
 
     # manage portfolio positions
     @classmethod
