@@ -1529,8 +1529,12 @@ class ThematicReport(Report):
         where = {'reportId': self.id}
         if basket_ids:
             where['basketId'] = basket_ids
-        dataset = ReportDataset.PTA_DATASET.value if self.position_source_type == PositionSourceType.Portfolio \
-            else ReportDataset.ATA_DATASET.value
+        # Use mapping to avoid duplicate condition evaluation
+        dataset_map = {
+            PositionSourceType.Portfolio: ReportDataset.PTA_DATASET.value,
+            PositionSourceType.Asset: ReportDataset.ATA_DATASET.value
+        }
+        dataset = dataset_map[self.position_source_type] if self.position_source_type in dataset_map else None
         query = DataQuery(where=where, fields=fields, start_date=start_date, end_date=end_date)
         results = GsDataApi.query_data(query=query, dataset_id=dataset)
         return pd.DataFrame(results) if return_format == ReturnFormat.DATA_FRAME else results
