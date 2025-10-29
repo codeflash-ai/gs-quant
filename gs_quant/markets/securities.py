@@ -995,7 +995,7 @@ class CommodityNaturalGasHub(Asset):
                  id_: str,
                  name: str,
                  entity: Optional[Dict] = None):
-        Asset.__init__(self, id_, AssetClass.Commod, name, entity=entity)
+        super().__init__(id_, AssetClass.Commod, name, entity=entity)
 
     def get_type(self) -> AssetType:
         return AssetType.COMMODITY_NATURAL_GAS_HUB
