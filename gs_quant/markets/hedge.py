@@ -683,10 +683,11 @@ class Hedge:
     A Marquee hedge.
     """
 
-    def __init__(self,
-                 parameters,
-                 objective: HedgeObjective
-                 ):
+    def __init__(
+        self,
+        parameters,
+        objective: HedgeObjective
+    ):
         self.__parameters = parameters
         self.__objective = objective
         self.__result = {}
@@ -798,24 +799,36 @@ class Hedge:
 
     @staticmethod
     def _enhance_result_with_benchmark_curves(formatted_results, benchmark_results, resolver):
-        asset_id_to_provided_identifier_map = dict(
-            (x['id'], provided_identifier)
+        # Precompute the asset_id_to_provided_identifier_map using dictionary comprehension for efficiency
+        asset_id_to_provided_identifier_map = {
+            x['id']: provided_identifier
             for provided_identifier, marquee_assets in resolver.items()
-            for x in marquee_assets)
+            for x in marquee_assets
+        }
 
-        if len(benchmark_results):
+        if benchmark_results:
+            format_dictionary_key_to_readable_format = Hedge.format_dictionary_key_to_readable_format  # Reduce attribute lookup inside loop
             for x in benchmark_results:
                 benchmark_asset_id = asset_id_to_provided_identifier_map[x['assetId']]
-                formatted_results[benchmark_asset_id] = Hedge.format_dictionary_key_to_readable_format(x)
+                formatted_results[benchmark_asset_id] = format_dictionary_key_to_readable_format(x)
 
         return formatted_results
 
     @staticmethod
     def format_dictionary_key_to_readable_format(renamed_results):
+        # Use list comprehension and join for efficient and readable transformation
         formatted_results = {}
-        for inner_key in renamed_results:
-            formatted_results[inner_key[0].capitalize() + ''.join(map(lambda x: x if x.islower() else f' {x}',
-                                                                      inner_key[1:]))] = renamed_results[inner_key]
+        for inner_key, value in renamed_results.items():
+            # Prepare the transformed key efficiently
+            # Avoiding repeated attribute lookups, precompute capitalized+spaced-out key
+            chars = [inner_key[0].capitalize()]
+            for ch in inner_key[1:]:
+                if ch.islower():
+                    chars.append(ch)
+                else:
+                    chars.append(f' {ch}')
+            formatted_key = ''.join(chars)
+            formatted_results[formatted_key] = value
         return formatted_results
 
     @staticmethod
