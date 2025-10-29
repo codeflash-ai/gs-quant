@@ -48,6 +48,7 @@ class Override(ABC):
         super().__init__()
 
     def as_dict(self) -> Dict:
+        # Avoid unnecessary local dict, construct immediately
         return {
             'columnNames': self.column_names
         }
@@ -58,6 +59,7 @@ class Override(ABC):
 
 
 class ValueOverride(Override):
+
     def __init__(self, column_names: List[str], value: Union[float, str, bool]):
         """
         Allows the ability to set a cell to a specific value.
@@ -69,10 +71,13 @@ class ValueOverride(Override):
         self.value = value
 
     def as_dict(self):
-        override = super().as_dict()
-        override['type'] = VALUE_OVERRIDE
-        override['value'] = self.value
-        return override
+        # Instead of copying dict from super().as_dict(), construct dict in one step for efficiency
+        # This avoids copying, and reduces attribute lookups/dict operations
+        return {
+            'columnNames': self.column_names,
+            'type': VALUE_OVERRIDE,
+            'value': self.value
+        }
 
     @classmethod
     def from_dict(cls, obj, ref):
