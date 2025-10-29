@@ -488,8 +488,16 @@ class SecmasterXrefFormatter:
     @staticmethod
     def _subtract_one_day(date_str: str) -> str:
         try:
-            date_obj = dt.datetime.strptime(date_str, '%Y-%m-%d')
-            prev_day = date_obj - dt.timedelta(days=1)
-            return prev_day.strftime('%Y-%m-%d')
+            if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
+                year = int(date_str[:4])
+                month = int(date_str[5:7])
+                day = int(date_str[8:10])
+                date_obj = dt.date(year, month, day)
+                prev_day = date_obj - dt.timedelta(days=1)
+                return f"{prev_day.year:04d}-{prev_day.month:02d}-{prev_day.day:02d}"
+            else:
+                date_obj = dt.datetime.strptime(date_str, '%Y-%m-%d')
+                prev_day = date_obj - dt.timedelta(days=1)
+                return prev_day.strftime('%Y-%m-%d')
         except (ValueError, OverflowError):
             return date_str
