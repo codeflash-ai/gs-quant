@@ -329,17 +329,33 @@ def _get_tdapi_crosscurrency_rates_assets(allow_many=False, **kwargs) -> Union[s
 
 def _check_crosscurrency_rateoption_type(currency, benchmark_type: Union[CrossCurrencyRateOptionType, str]) \
         -> CrossCurrencyRateOptionType:
-    if isinstance(benchmark_type, str):
-        if benchmark_type.upper() in CrossCurrencyRateOptionType.__members__:
-            benchmark_type = CrossCurrencyRateOptionType[benchmark_type.upper()]
-        else:
-            raise MqValueError(
-                benchmark_type.upper() + ' is not valid, pick one among ' +
-                ', '.join([x.value for x in CrossCurrencyRateOptionType]))
+    # Cache upper-cased CrossCurrencyRateOptionType members to avoid repeated .upper() and dict lookup
+    members = CrossCurrencyRateOptionType.__members__
 
-    if isinstance(benchmark_type, CrossCurrencyRateOptionType) and \
-            benchmark_type.value not in CURRENCY_TO_XCCY_SWAP_RATE_BENCHMARK[currency.value].keys():
-        raise MqValueError('%s is not supported for %s', benchmark_type.value, currency.value)
+    # Cache .value lists once per call for MqValueError construction
+    values = None
+
+    # Fast-path: get upper once if benchmark_type is str
+    if isinstance(benchmark_type, str):
+        bench_upper = benchmark_type.upper()
+        member = members.get(bench_upper)
+        if member is not None:
+            benchmark_type = member
+        else:
+            # Only construct values list if raising error (often not needed)
+            values = [x.value for x in CrossCurrencyRateOptionType]
+            raise MqValueError(
+                bench_upper + ' is not valid, pick one among ' +
+                ', '.join(values))
+
+    # Direct lookup instead of keys()/in + avoid re-computation of currency.value lookup
+    if isinstance(benchmark_type, CrossCurrencyRateOptionType):
+        currency_val = currency.value
+        # Use mapping directly (OrderedDict supports __contains__ efficiently)
+        rate_map = CURRENCY_TO_XCCY_SWAP_RATE_BENCHMARK[currency_val]
+        if benchmark_type.value not in rate_map:
+            raise MqValueError('%s is not supported for %s', benchmark_type.value, currency_val)
+        return benchmark_type
     else:
         return benchmark_type
 
