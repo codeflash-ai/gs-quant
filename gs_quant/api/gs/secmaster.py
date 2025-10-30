@@ -650,7 +650,10 @@ class GsSecurityMasterApi:
     def _prepare_string_or_list_param(cls, value: Union[str, list], param_name: str):
         if isinstance(value, str):
             return [value]  # Wrap single string in a list
-        elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+        elif isinstance(value, list):
+            for item in value:
+                if not isinstance(item, str):
+                    raise ValueError(f"{param_name} must be a string or a list of strings")
             return value  # Use the list directly
         else:
             raise ValueError(f"{param_name} must be a string or a list of strings")
