@@ -30,6 +30,15 @@ from .datetime import align
 from .helper import plot_function, Interpolate
 from ..errors import MqValueError, MqTypeError
 
+_OPERATOR_MAP = {
+    'EQUALS': lambda s, v: s == v,
+    'GREATER': lambda s, v: s > v,
+    'LESS': lambda s, v: s < v,
+    'L_EQUALS': lambda s, v: s <= v,
+    'G_EQUALS': lambda s, v: s >= v,
+    'N_EQUALS': lambda s, v: s != v
+}
+
 """
 Algebra library contains basic numerical and algebraic operations, including addition, division, multiplication,
 division and other functions on timeseries
@@ -598,23 +607,16 @@ def filter_(x: pd.Series, operator: Optional[FilterOperator] = None, value: Opti
     elif value is None:
         raise MqValueError('No value is specified for the operator')
     else:
-        if operator == FilterOperator.EQUALS:
-            remove = x == value
-        elif operator == FilterOperator.GREATER:
-            remove = x > value
-        elif operator == FilterOperator.LESS:
-            remove = x < value
-        elif operator == FilterOperator.L_EQUALS:
-            remove = x <= value
-        elif operator == FilterOperator.G_EQUALS:
-            remove = x >= value
-        elif operator == FilterOperator.N_EQUALS:
-            remove = x != value
-        else:
-            if not isinstance(operator, str):
-                operator = str(operator)
-            raise MqValueError('Unexpected operator: ' + operator)
-        x = x.drop(x[remove].index)
+        op_key = getattr(operator, 'name', None)
+        if op_key is None:
+            op_key = str(operator)
+        
+        func = _OPERATOR_MAP.get(op_key)
+        if func is None:
+            raise MqValueError('Unexpected operator: ' + op_key)
+        
+        remove = func(x, value)
+        x = x[~remove]
     return x
 
 
