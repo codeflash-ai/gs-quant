@@ -393,6 +393,8 @@ def log(x: pd.Series) -> pd.Series:
     :func:`exp`
 
     """
+    if isinstance(x, pd.Series):
+        return pd.Series(np.log(x.values), index=x.index, name=x.name)
     return np.log(x)
 
 
