@@ -112,7 +112,8 @@ def repeat(x: pd.Series, n: int = 1) -> pd.Series:
         raise MqValueError('n must be between 0 and 367')
     if x.empty:
         return x
-    index = pd.date_range(freq=f'{n}D', start=x.index[0], end=x.index[-1])
+
+    index = pd.date_range(start=x.index[0], end=x.index[-1], freq=pd.Timedelta(days=n))
     return x.reindex(index, method='ffill')
 
 
