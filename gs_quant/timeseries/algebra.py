@@ -649,32 +649,55 @@ def filter_dates(x: pd.Series, operator: Optional[FilterOperator] = None,
 
     """
 
+    # Fast path: dropna is already efficient, but drop assignment for early return
     if dates is None and operator is None:
-        x = x.dropna(axis=0, how='any')
-    elif dates is None:
+        return x.dropna(axis=0, how='any')
+
+    if dates is None:
         raise MqValueError('No date is specified for the operator')
-    elif isinstance(dates, list) and operator not in [FilterOperator.EQUALS, FilterOperator.N_EQUALS]:
+
+    # Avoid calling isinstance(dates, list) and operator comparison twice for same condition
+    if isinstance(dates, list) and operator not in [FilterOperator.EQUALS, FilterOperator.N_EQUALS]:
         raise MqValueError('Operator does not work for list of dates')
+
+    # Optimize operator logic by using masks for set membership to improve performance over pandas .loc + .isin
+    if operator == FilterOperator.EQUALS:
+        # Make a set for faster membership checks
+        if not isinstance(dates, list):
+            dates = [dates]
+        date_set = set(dates)
+        mask = ~x.index.isin(date_set)
+        return x[mask]
+
+    elif operator == FilterOperator.N_EQUALS:
+        if not isinstance(dates, list):
+            dates = [dates]
+        date_set = set(dates)
+        # For N_EQUALS, keep only dates in the set (faster than .loc with .isin)
+        mask = x.index.isin(date_set)
+        return x[mask]
+
+    elif operator == FilterOperator.GREATER:
+        # .loc[x.index <= dates] is correct; use index comparison for mask
+        mask = x.index <= dates
+        return x[mask]
+
+    elif operator == FilterOperator.LESS:
+        mask = x.index >= dates
+        return x[mask]
+
+    elif operator == FilterOperator.L_EQUALS:
+        mask = x.index > dates
+        return x[mask]
+
+    elif operator == FilterOperator.G_EQUALS:
+        mask = x.index < dates
+        return x[mask]
+
     else:
-        if operator == FilterOperator.EQUALS:
-            dates = dates if isinstance(dates, list) else [dates]
-            x = x.loc[~x.index.isin(dates)]
-        elif operator == FilterOperator.N_EQUALS:
-            dates = dates if isinstance(dates, list) else [dates]
-            x = x.loc[x.index.isin(dates)]
-        elif operator == FilterOperator.GREATER:
-            x = x.loc[x.index <= dates]
-        elif operator == FilterOperator.LESS:
-            x = x.loc[x.index >= dates]
-        elif operator == FilterOperator.L_EQUALS:
-            x = x.loc[x.index > dates]
-        elif operator == FilterOperator.G_EQUALS:
-            x = x.loc[x.index < dates]
-        else:
-            if not isinstance(operator, str):
-                operator = str(operator)
-            raise MqValueError('Unexpected operator: ' + operator)
-    return x
+        if not isinstance(operator, str):
+            operator = str(operator)
+        raise MqValueError('Unexpected operator: ' + operator)
 
 
 def _sum_boolean_series(*series):
