@@ -453,11 +453,14 @@ def sqrt(x: Union[Real, pd.Series]) -> Union[Real, pd.Series]:
 
     """
     if isinstance(x, pd.Series):
-        return np.sqrt(x)
+        values = x.values
+        result = np.sqrt(values)
+        return pd.Series(result, index=x.index, name=x.name)
 
     result = math.sqrt(x)
+    rounded_result = round(result)
     # return int if result is integral (should work for values up to 2**53)
-    return round(result) if round(result) == result else result
+    return rounded_result if rounded_result == result else result
 
 
 @plot_function
