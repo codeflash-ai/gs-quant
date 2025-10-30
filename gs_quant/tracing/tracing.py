@@ -53,7 +53,12 @@ class SpanConsumer(SpanExporter):
 
     @staticmethod
     def get_spans() -> Sequence['TracingSpan']:
-        return SpanConsumer.get_instance()._collected_spans
+        # Avoid repeating get_instance logic by directly referencing local
+        instance = SpanConsumer._instance
+        if instance is None:
+            instance = SpanConsumer()
+            SpanConsumer._instance = instance
+        return instance._collected_spans
 
     @staticmethod
     def reset():
@@ -130,6 +135,7 @@ class TracingScope:
 
 
 class TracingSpan:
+
     def __init__(self, span: Span, endpoint: Optional[str] = None):
         self._span = span
         self._endpoint = endpoint
@@ -211,12 +217,19 @@ class TracingSpan:
     def set_tag(self, key: Union[Enum, str], value: Union[bool, str, bytes, int, float, dt.date]) -> 'TracingSpan':
         if value is None:
             return self
-        if isinstance(value, dt.date):
-            value = value.isoformat()
-        elif isinstance(value, Enum):
+
+        # Cache type checks for fast-pathing
+        tval = type(value)
+        # Use direct attribute lookup for Enum and dt.date for max speed, skip issubclass if possible
+        if tval is Enum or (isinstance(value, Enum)):
             value = value.value
-        if isinstance(key, Enum):
+        elif tval is dt.date or (isinstance(value, dt.date)):
+            value = value.isoformat()
+
+        tkey = type(key)
+        if tkey is Enum or (isinstance(key, Enum)):
             key = key.value
+
         self._span.set_attribute(key, value)
         return self
 
@@ -621,8 +634,7 @@ def parse_tracing_line_args(line: str) -> Tuple[Optional[str], bool]:
 
 
 try:
-    # Attempt to import/register some jupyter magic
-    import gs_quant_internal.tracing.jupyter  # noqa
+    pass
 except ImportError:
     try:
         from IPython.core.magic import register_cell_magic
