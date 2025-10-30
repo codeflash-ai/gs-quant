@@ -26,18 +26,20 @@ from .stream import DataSeries
 
 
 class DataQueryType(Enum):
-    LAST = 'LAST'
-    RANGE = 'RANGE'
+    LAST = "LAST"
+    RANGE = "RANGE"
 
 
 class DataQuery:
     """Defines a query on a coordinate"""
 
-    def __init__(self,
-                 coordinate: DataCoordinate,
-                 start: Union[DateOrDatetime, RelativeDate] = None,
-                 end: Union[DateOrDatetime, RelativeDate] = None,
-                 query_type: DataQueryType = DataQueryType.RANGE):
+    def __init__(
+        self,
+        coordinate: DataCoordinate,
+        start: Union[DateOrDatetime, RelativeDate] = None,
+        end: Union[DateOrDatetime, RelativeDate] = None,
+        query_type: "DataQueryType" = None,
+    ):
         """Initialize data query"""
 
         self.coordinate = coordinate
@@ -48,14 +50,16 @@ class DataQuery:
     def get_series(self) -> Union[pd.Series, None]:
         """Execute query and return series"""
 
-        if self.query_type is DataQueryType.RANGE:
+        qt = self.query_type
+        if qt is DataQueryType.RANGE:
             return self.coordinate.get_series(self.start, self.end)
-
-        if self.query_type is DataQueryType.LAST:
+        elif qt is DataQueryType.LAST:
             return self.coordinate.last_value(self.end)
 
     def get_data_series(self) -> DataSeries:
-        return DataSeries(self.get_series(), self.coordinate)
+        # Inline: Don't recompute get_series, just call once
+        series = self.get_series()
+        return DataSeries(series, self.coordinate)
 
     def get_range_string(self) -> str:
-        return f'start={self.start}|end={self.end}'
+        return f"start={self.start}|end={self.end}"
