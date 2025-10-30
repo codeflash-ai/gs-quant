@@ -25,6 +25,7 @@ from gs_quant.datetime import relative_date_add
 from . import align
 from .helper import plot_function, Window, Interpolate
 from ..errors import MqValueError
+import numpy as np
 
 """
 Timeseries analysis library contains functions used to analyze properties of timeseries, including laging, differencing,
@@ -78,18 +79,32 @@ def smooth_spikes(x: pd.Series, threshold: float,
     if len(x) < 3:
         return pd.Series(dtype=float)
 
-    threshold_value, check_spike = (threshold, check_absolute) if threshold_type == ThresholdType.absolute else (
-        (1 + threshold), check_percentage)
+    # PREALLOCATE numpy arrays for computation for efficiency
+    arr = x.values
+    n = len(arr)
+    previous = arr[:-2]
+    current = arr[1:-1]
+    next_ = arr[2:]
 
+    if threshold_type == ThresholdType.absolute:
+        threshold_value = threshold
+        # Use numpy vectorized computation for spike detection
+        higher = (current > previous + threshold_value) & (current > next_ + threshold_value)
+        lower = (previous > current + threshold_value) & (next_ > current + threshold_value)
+    else:
+        threshold_value = 1 + threshold
+        higher = (current > previous * threshold_value) & (current > next_ * threshold_value)
+        lower = (previous > current * threshold_value) & (next_ > current * threshold_value)
+
+    spikes = higher | lower
+
+    # Create a copy for result, so we preserve x's index and type
     result = x.copy()
-    current, next_ = x.iloc[0:2]
-    for i in range(1, len(x) - 1):
-        previous = current
-        current = next_
-        next_ = x.iloc[i + 1]
+    # Only apply to indices 1..n-2 (corresponds to result.iloc[i] in original code)
+    idx = np.flatnonzero(spikes) + 1  # Indices that need to be updated
 
-        if check_spike(previous, current, next_, threshold_value):
-            result.iloc[i] = (previous + next_) / 2
+    # Vectorized smoothing for spikes
+    result.iloc[idx] = (previous[idx - 1] + next_[idx - 1]) / 2
 
     return result[1:-1]
 
