@@ -533,7 +533,12 @@ class PricingContext(ContextBaseWithDefault):
         return self._inherited_val('use_historical_diddles_only', default=False)
 
     def clone(self, **kwargs):
-        clone_kwargs = {k: getattr(self, k, None) for k in signature(self.__init__).parameters.keys()}
+        # Cache the __init__ signature keys as a static variable at the class level for speed
+        # This avoids repeated reflection/signature computation for each clone
+        cls = type(self)
+        if not hasattr(cls, '_init_keys'):
+            cls._init_keys = list(signature(self.__init__).parameters.keys())
+        clone_kwargs = {k: getattr(self, k, None) for k in cls._init_keys}
         clone_kwargs.update(kwargs)
         return self.__class__(**clone_kwargs)
 
