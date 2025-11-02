@@ -18,6 +18,8 @@ from typing import Tuple, Dict, Any, List
 from gs_quant.session import GsSession
 from gs_quant.target.base_screener import Screener
 
+_CLEAR_SCREEN_HEADERS = {'Content-Type': 'application/json;charset=utf-8'}
+
 _logger = logging.getLogger(__name__)
 
 
@@ -122,9 +124,12 @@ class GsBaseScreenerApi:
 
         :return: dict, a dictionary with information about if the screener was successfully cleared.
         """
-        request_headers = {'Content-Type': 'application/json;charset=utf-8'}
-        return GsSession.current._post('/data/screeners/{id}/clear'.format(id=screener_id), {},
-                                       request_headers=request_headers)
+        # Hoist the constant header to avoid recreation each call (memory/performance optimization)
+        # and use an f-string (faster than .format for this trivial case)
+        request_headers = _CLEAR_SCREEN_HEADERS
+        return GsSession.current._post(
+            f'/data/screeners/{screener_id}/clear', {}, request_headers=request_headers
+        )
 
     @classmethod
     def delete_screener(cls, screener_id: str) -> None:
