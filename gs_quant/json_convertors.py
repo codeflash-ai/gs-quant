@@ -22,6 +22,8 @@ import pandas as pd
 from dataclasses_json import config
 from dateutil.parser import isoparse
 
+_SUBSEC_RE = re.compile(r'\.([0-9]*)Z$')
+
 __valid_date_formats = ('%Y-%m-%d',  # '2020-07-28'
                         '%d%b%y',  # '28Jul20'
                         '%d%b%Y',  # '28Jul2020'
@@ -166,13 +168,18 @@ def decode_datetime(value: Optional[Union[int, str]]) -> Optional[dt.datetime]:
     if value is None or isinstance(value, dt.datetime):
         return value
     if isinstance(value, int):
-        return dt.datetime.fromtimestamp(value / 1000)
+        # Use integer division for direct conversion, avoiding floating point ops
+        return dt.datetime.fromtimestamp(value // 1000 if value % 1000 == 0 else value / 1000)
     elif isinstance(value, str):
-        matcher = re.search('\\.([0-9]*)Z$', value)
+        matcher = _SUBSEC_RE.search(value)
         if matcher:
             sub_seconds = matcher.group(1)
             if len(sub_seconds) > 6:
-                value = re.sub(matcher.re, '.{}Z'.format(sub_seconds[:6]), value)
+                # Avoid re.sub and format by using string slicing for max efficiency
+                start, end = matcher.span(1)
+                # Replace only the matched subsecond portion
+                value = value[:start] + sub_seconds[:6] + value[end:]
+
 
         return isoparse(value)
 
