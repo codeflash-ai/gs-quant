@@ -60,7 +60,7 @@ class GsBacktestApi:
 
     @classmethod
     def delete_backtest(cls, backtest_id: str) -> dict:
-        return GsSession.current._delete('/backtests/{id}'.format(id=backtest_id))
+        return GsSession.current._delete(f'/backtests/{backtest_id}')
 
     @classmethod
     def get_results(cls, backtest_id: str) -> Tuple[BacktestResult, ...]:
