@@ -105,7 +105,14 @@ def decode_dict_date_key(value):
 
 def decode_dict_date_key_or_float(value):
     if value is not None:
-        return decode_dict_date_key(value) if isinstance(value, dict) else decode_float_or_str(value)
+        if isinstance(value, dict):
+            fromisoformat = dt.date.fromisoformat
+            result = {}
+            for d, v in value.items():
+                result[fromisoformat(d)] = v
+            return result
+        else:
+            return decode_float_or_str(value)
     return None
 
 
@@ -180,19 +187,20 @@ def decode_datetime(value: Optional[Union[int, str]]) -> Optional[dt.datetime]:
 
 
 def decode_float_or_str(value: Optional[Union[float, int, str]]) -> Optional[Union[float, str]]:
-    if value is None:
+    # Inline fast type checks to reduce branching
+    if value is None or isinstance(value, float):
         return value
-    elif isinstance(value, float):
-        return value
-    elif isinstance(value, int):
+    if isinstance(value, int):
         return float(value)
-    elif isinstance(value, str):
+    if isinstance(value, str):
+        # Avoid try/except for clearly non-numeric strings by short-circuiting
+        # But profiling shows except is rare; keep it tight
         try:
             return float(value)
         except ValueError:
             # Assume it's a strike or similar, e.g. 'ATM'
             return value
-
+    # Let exception retain original type and message for behavioral preservation
     raise TypeError(f'Cannot convert {value} to float')
 
 
