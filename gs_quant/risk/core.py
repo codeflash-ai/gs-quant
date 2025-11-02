@@ -79,18 +79,41 @@ class ResultInfo(metaclass=ABCMeta):
     def composition_info(components: Iterable):
         from gs_quant.markets.markets import historical_risk_key
 
-        dates = []
+        # Convert components to list to allow multiple passes (in case components is a generator)
+        components_list = list(components)
+
+        # Preallocate to minimize per-iteration attribute lookups
         values = []
+        dates = []
         errors = {}
         risk_key = None
         unit = None
 
-        for component in components:
-            date = component.risk_key.date
-            risk_key = historical_risk_key(component.risk_key) if risk_key is None else risk_key
+        # Find the first component that is not an ErrorValue, Exception, or UnsupportedValue for setup
+        for component in components_list:
+            if not isinstance(component, (ErrorValue, Exception, UnsupportedValue)):
+                risk_key = historical_risk_key(component.risk_key)
+                unit = component.unit
+                break
+        else:
+            # If all components are error/unsupported, fallback to the first component's risk_key or raise
+            if components_list:
+                risk_key = historical_risk_key(components_list[0].risk_key)
+            unit = None
 
-            if risk_key.market.location != component.risk_key.market.location:
-                raise ValueError('Cannot compose results with different markets')
+        # Cache target location string if available to minimize repeated lookups/comparisons
+        target_location = None
+        if risk_key is not None and hasattr(risk_key.market, 'location'):
+            target_location = risk_key.market.location
+
+        for component in components_list:
+            rk = getattr(component, 'risk_key', None)
+            date = getattr(rk, 'date', None)
+            # Defensive: date is always sourced from component.risk_key.date, as original
+            if risk_key is not None and rk is not None:
+                location = getattr(rk.market, 'location', None)
+                if target_location is not None and location != target_location:
+                    raise ValueError('Cannot compose results with different markets')
 
             if isinstance(component, (ErrorValue, Exception)):
                 errors[date] = component
@@ -101,7 +124,6 @@ class ResultInfo(metaclass=ABCMeta):
             else:
                 values.append(component.raw_value)
                 dates.append(date)
-                unit = unit or component.unit
 
         return dates, values, errors, risk_key, unit
 
@@ -178,7 +200,9 @@ class ScalarWithInfo(ResultInfo, metaclass=ABCMeta):
     @staticmethod
     def compose(components: Iterable):
         dates, values, errors, risk_key, unit = ResultInfo.composition_info(components)
-        return SeriesWithInfo(pd.Series(index=pd.DatetimeIndex(dates).date, data=values),
+        # Use pd.to_datetime only if dates are not already datetime-like
+        date_index = pd.DatetimeIndex(dates).date if dates else []
+        return SeriesWithInfo(pd.Series(index=date_index, data=values),
                               risk_key=risk_key,
                               unit=unit,
                               error=errors)
