@@ -889,9 +889,8 @@ def portfolio_correlation(portfolio_id: str, benchmark_id: str, rolling_window: 
     :return: time series of the correlation coefficient
     """
     pm = PortfolioManager(portfolio_id)
-
-    performance_report = pm.get_performance_report()
-    return ReportMeasures.portfolio_correlation(performance_report.id, benchmark_id, rolling_window)
+    # Pass report id directly, no superfluous variable creation
+    return ReportMeasures.portfolio_correlation(pm.get_performance_report().id, benchmark_id, rolling_window)
 
 
 @plot_measure_entity(EntityType.PORTFOLIO, [QueryType.R_SQUARED])
