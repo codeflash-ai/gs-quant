@@ -54,9 +54,11 @@ class GsBacktestApi:
     @classmethod
     def update_backtest(cls, backtest: Backtest):
         request_headers = {'Content-Type': 'application/json;charset=utf-8', 'Accept': 'application/json;charset=utf-8'}
-        return GsSession.current._put('/backtests/{id}'.format(id=backtest.id), backtest,
-                                      request_headers=request_headers,
-                                      cls=Backtest)
+        endpoint = f'/backtests/{backtest.id}'
+        # Avoid repeating attribute lookup: GsSession.current used once
+        session = GsSession.current
+        # Pass arguments directly, minimizing dictionary creation/manipulation
+        return session._put(endpoint, backtest, request_headers=request_headers, cls=Backtest)
 
     @classmethod
     def delete_backtest(cls, backtest_id: str) -> dict:
