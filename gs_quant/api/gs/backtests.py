@@ -37,10 +37,19 @@ class GsBacktestApi:
                            owner_id: str = None,
                            name: str = None,
                            mq_symbol: str = None) -> Tuple[Backtest, ...]:
-        query_string = urlencode(dict(filter(lambda item: item[1] is not None,
-                                             dict(id=backtest_id, ownerId=owner_id, name=name,
-                                                  mqSymbol=mq_symbol, limit=limit).items())))
-        return GsSession.current._get('/backtests?{query}'.format(query=query_string), cls=Backtest)['results']
+        # Optimize query param construction by eliminating dict, filter, and lambda
+        params = {}
+        if backtest_id is not None:
+            params["id"] = backtest_id
+        if owner_id is not None:
+            params["ownerId"] = owner_id
+        if name is not None:
+            params["name"] = name
+        if mq_symbol is not None:
+            params["mqSymbol"] = mq_symbol
+        params["limit"] = limit
+        query_string = urlencode(params)
+        return GsSession.current._get(f'/backtests?{query_string}', cls=Backtest)['results']
 
     @classmethod
     def get_backtest(cls, backtest_id: str) -> Backtest:
