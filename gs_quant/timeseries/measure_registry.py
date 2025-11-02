@@ -17,6 +17,8 @@ import re
 
 from gs_quant.errors import MqError
 
+_canonicalize_rx = re.compile(r"[^\w]")
+
 registry = {}
 
 
@@ -31,15 +33,14 @@ class MultiMeasure:
         fns = self.measure_map.get(asset_class, ())
 
         def canonicalize(word):
-            pruned = re.sub(r"[^\w]", "", word)
-            return pruned.casefold()
+            return _canonicalize_rx.sub("", word).casefold()
 
         canonicalized = canonicalize(asset_type.value)
 
         for fn in fns:
-            if (fn.asset_type is None or canonicalized in map(lambda x: canonicalize(x.value), fn.asset_type)) \
+            if (fn.asset_type is None or canonicalized in {canonicalize(x.value) for x in fn.asset_type}) \
                     and (fn.asset_type_excluded is None or canonicalized not in
-                         map(lambda x: canonicalize(x.value), fn.asset_type_excluded)):
+                         {canonicalize(x.value) for x in fn.asset_type_excluded}):
                 return fn
 
         raise MqError("No measure {} defined for asset class {} and type {}".format(self.display_name, asset_class,
