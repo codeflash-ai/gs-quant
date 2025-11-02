@@ -99,7 +99,8 @@ class RiskApi(GenericRiskApi, metaclass=ABCMeta):
 
     @classmethod
     def calc_multi(cls, requests: Iterable[RiskRequest]) -> dict:
-        return {request: cls.calc(request) for request in requests}
+        calc = cls.calc
+        return {request: calc(request) for request in requests}
 
     @classmethod
     def __handle_queue_update(cls,
