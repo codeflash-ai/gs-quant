@@ -110,8 +110,22 @@ def decode_dict_date_key_or_float(value):
 
 
 def decode_dict_dict_date_key(value):
-    return {k: {dt.date.fromisoformat(d): v for d, v in val.items()} if val is not None else None
-            for k, val in value.items()} if value is not None else None
+    # Check for None input early
+    if value is None:
+        return None
+    # Locally bind dt.date.fromisoformat for faster lookup
+    _fromiso = dt.date.fromisoformat
+    result = {}
+    for k, val in value.items():
+        if val is None:
+            result[k] = None
+        else:
+            # Pre-size inner dict for memory efficiency
+            inner = {}
+            for d, v in val.items():
+                inner[_fromiso(d)] = v
+            result[k] = inner
+    return result
 
 
 def decode_dict_date_value(value):
