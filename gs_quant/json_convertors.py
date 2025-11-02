@@ -284,15 +284,15 @@ def encode_named_dictable(o):
 
 
 def _get_dc_type(cls, name_field: str, allow_missing: bool):
-    type_field = list(filter(lambda f: f.name in (name_field, f'{name_field}_'), fields(cls)))
-    if len(type_field) == 0:
-        if allow_missing:
-            return None
-        raise ValueError(f'Class {cls} has no "{name_field}" property')
-    def_value = type_field[0].default
-    if def_value == MISSING or def_value is None:
-        raise ValueError('No default value for "class_type" field on class')
-    return def_value
+    for f in fields(cls):
+        if f.name == name_field or f.name == f'{name_field}_':
+            def_value = f.default
+            if def_value == MISSING or def_value is None:
+                raise ValueError('No default value for "class_type" field on class')
+            return def_value
+    if allow_missing:
+        return None
+    raise ValueError(f'Class {cls} has no "{name_field}" property')
 
 
 def _value_decoder(type_to_cls_map, explicit_cls=None, str_mapper=None):
