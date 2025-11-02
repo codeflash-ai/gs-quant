@@ -21,6 +21,7 @@ from typing import Optional, Union, Iterable, Dict, Tuple, Any
 import pandas as pd
 from dataclasses_json import config
 from dateutil.parser import isoparse
+from functools import lru_cache
 
 __valid_date_formats = ('%Y-%m-%d',  # '2020-07-28'
                         '%d%b%y',  # '28Jul20'
@@ -125,7 +126,7 @@ def decode_datetime_tuple(blob: Tuple[str, ...]):
 def __try_decode_valid_date_formats(value: str) -> Optional[dt.date]:
     for fmt in __valid_date_formats:
         try:
-            return dt.datetime.strptime(value, fmt).date()
+            return __cached_strptime(fmt, value)
         except ValueError:
             pass
     return None
@@ -327,3 +328,8 @@ def dc_decode(*classes, name_field='class_type', allow_missing=False):
     mappings = ((_get_dc_type(cls, name_field, allow_missing), cls) for cls in classes)
     type_to_cls_map = dict((k, v) for k, v in mappings if k is not None)
     return _value_decoder(type_to_cls_map, None)
+
+
+@lru_cache(maxsize=None)
+def __cached_strptime(fmt: str, value: str) -> dt.date:
+    return dt.datetime.strptime(value, fmt).date()
