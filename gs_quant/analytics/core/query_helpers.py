@@ -112,16 +112,13 @@ def fetch_query(query_info: Dict):
 
 
 def build_query_string(dimensions):
-    output = ''
-    for count, dimension in enumerate(dimensions):
+    parts = []
+    for dimension in dimensions:
         value = dimension[1]
         if isinstance(value, str):
             value = f'"{value}"'
-        if count == 0:
-            output += f'{dimension[0]} == {value}'
-        else:
-            output += f' & {dimension[0]} == {value}'
-    return output
+        parts.append(f'{dimension[0]} == {value}')
+    return ' & '.join(parts)
 
 
 def valid_dimensions(query_dimensions: Tuple[str, Union[str, float, bool]], df: pd.DataFrame) -> bool:
