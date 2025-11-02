@@ -20,26 +20,35 @@ from typing import Dict
 
 
 def encode_series_result(s: pd.Series) -> Dict:
-    return {'index': tuple(s.index), 'name': s.name, 'values': tuple(s.values)}
+    return {"index": tuple(s.index), "name": s.name, "values": tuple(s.values)}
 
 
 def encode_dataframe_result(df: pd.DataFrame) -> Dict:
-    return {'index': tuple(df.index), 'columns': tuple(df.columns), 'values': tuple(tuple(v) for v in df.values)}
+    return {
+        "index": tuple(df.index),
+        "columns": tuple(df.columns),
+        "values": tuple(tuple(v) for v in df.values),
+    }
 
 
 def _convert_list_to_dates(lst: list):
     if not (lst and isinstance(lst[0], str)):
         return lst
     try:
-        lst = tuple(dt.date.fromisoformat(v) for v in lst)
+        parse = dt.date.fromisoformat
+        lst = tuple(map(parse, lst))
     except ValueError:
         pass
     return lst
 
 
 def decode_series_result(s: dict) -> pd.Series:
-    return pd.Series(s['values'], index=_convert_list_to_dates(s['index']), name=s['name'])
+    return pd.Series(
+        s["values"], index=_convert_list_to_dates(s["index"]), name=s["name"]
+    )
 
 
 def decode_dataframe_result(s: dict) -> pd.DataFrame:
-    return pd.DataFrame(s['values'], index=_convert_list_to_dates(s['index']), columns=s['columns'])
+    return pd.DataFrame(
+        s["values"], index=_convert_list_to_dates(s["index"]), columns=s["columns"]
+    )
