@@ -44,7 +44,7 @@ class GsBacktestApi:
 
     @classmethod
     def get_backtest(cls, backtest_id: str) -> Backtest:
-        return GsSession.current._get('/backtests/{id}'.format(id=backtest_id), cls=Backtest)
+        return GsSession.current._get(f'/backtests/{backtest_id}', cls=Backtest)
 
     @classmethod
     def create_backtest(cls, backtest: Backtest) -> Backtest:
