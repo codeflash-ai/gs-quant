@@ -511,14 +511,14 @@ class PortfolioManager(PositionedEntity):
 
         **Examples**
 
-        >>> model = MacroRiskModel.get(\"MODEL\")
+        >>> model = MacroRiskModel.get("MODEL")
         >>> pm = PortfolioManager("PORTFOLIO ID")
         >>> exposure_dataframe = pm.get_macro_exposure(
         >>>     model=model,
         >>>     date=dt.date(2022, 1, 1),
         >>>     factor_type=FactorType.Factor
         >>> ).sort_values(
-        >>>     by=[\"Total Factor Exposure\"],
+        >>>     by=["Total Factor Exposure"],
         >>>     axis=1,
         >>>     ascending=False
         >>> )
@@ -526,11 +526,11 @@ class PortfolioManager(PositionedEntity):
         performance_report = self.get_performance_report(tags)
 
         # Get portfolio constituents
-        constituents_and_notional_df = build_portfolio_constituents_df(performance_report, date). \
-            rename(columns={"name": "Asset Name", "netExposure": "Notional"})
+        constituents_and_notional_df = build_portfolio_constituents_df(performance_report, date) \
+            .rename(columns={"name": "Asset Name", "netExposure": "Notional"})
 
         # Query universe sensitivity
-        universe = constituents_and_notional_df.index.dropna().tolist()
+        universe = list(constituents_and_notional_df.index.values)
         universe_sensitivities_df = build_sensitivity_df(universe, model, date, factor_type, get_factors_by_name)
 
         # Remove assets without exposure
