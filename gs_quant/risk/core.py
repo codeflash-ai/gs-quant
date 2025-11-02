@@ -285,10 +285,7 @@ class SeriesWithInfo(pd.Series, ResultInfo):
                               error=errors)
 
     def _to_records(self, extra_dict, display_options: DisplayOptions = None):
-        df = pd.DataFrame(self).reset_index()
-        df.columns = ['dates', 'value']
-        records = df.to_dict('records')
-        records = [dict(item, **{**extra_dict}) for item in records]
+        records = [{'dates': index, 'value': value, **extra_dict} for index, value in self.items()]
         return records
 
     def __mul__(self, other):
