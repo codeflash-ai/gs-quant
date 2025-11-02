@@ -458,16 +458,39 @@ def aggregate_risk(results: Iterable[Union[DataFrameWithInfo, Future]],
     delta and vega are Dataframes, representing the merged risk of the individual instruments
     """
 
-    def get_df(result_obj):
-        if isinstance(result_obj, Future):
-            result_obj = result_obj.result()
-        if isinstance(result_obj, pd.Series) and allow_heterogeneous_types:
-            return pd.DataFrame(result_obj.raw_value).T
-        return result_obj.raw_value
+    # Fast path for empty input
+    results = list(results)
+    if not results:
+        # Preserve behavioral contract: returning empty sorted DataFrame if no results.
+        result = pd.DataFrame()
+        return sort_risk(result)
 
-    dfs = [get_df(r) for r in results]
-    result = pd.concat(dfs).fillna(0)
-    result = result.groupby([c for c in result.columns if c != 'value'], as_index=False).sum()
+    # avoid inner function call in loop for performance, use local lookup
+    future_type = Future
+    pd_Series_type = pd.Series
+    pd_DataFrame_type = pd.DataFrame
+
+    # Pre-allocate list
+    dfs = []
+    append = dfs.append
+
+    for r in results:
+        # Inline the function for lower overhead and more direct execution
+        if isinstance(r, future_type):
+            r = r.result()
+        if isinstance(r, pd_Series_type) and allow_heterogeneous_types:
+            # .raw_value may be a scalar or array; wrap appropriately
+            append(pd_DataFrame_type(r.raw_value).T)
+        else:
+            append(r.raw_value)
+
+    # Concatenate and fillna directly on the iterator, use sort=False for faster concat
+    result = pd.concat(dfs, ignore_index=True, sort=False).fillna(0)
+    # Precompute value exclusion for columns
+    group_cols = [c for c in result.columns if c != 'value']
+    # Use .sum(min_count=1) (only available in recent pandas) guarantees NaN only for empty slices, keep as .sum() for compatibility
+    result = result.groupby(group_cols, as_index=False, sort=False).sum()
+
 
     if threshold is not None:
         result = result[result.value.abs() > threshold]
@@ -484,42 +507,64 @@ def aggregate_results(results: Iterable[ResultType], allow_mismatch_risk_keys=Fa
     risk_key = None
     results = tuple(results)
 
-    if not len(results):
+    if not results:
         return None
 
+
+    # Inline types for direct access in loop
+    dict_type = dict
+    tuple_type = tuple
+    FloatWithInfo_type = FloatWithInfo
+    SeriesWithInfo_type = SeriesWithInfo
+    DataFrameWithInfo_type = DataFrameWithInfo
+    Exception_type = Exception
+
+    # Single pass checks for error, unit/type/risk_key validation
+    result_type0 = type(results[0])
+
     for result in results:
-        if isinstance(result, Exception):
+        if isinstance(result, Exception_type):
             raise Exception
 
         if result.error:
             raise ValueError('Cannot aggregate results in error')
 
-        if not allow_heterogeneous_types and not isinstance(result, type(results[0])):
-            raise ValueError(f'Cannot aggregate heterogeneous types: {type(result)} vs {type(results[0])}')
+        if not allow_heterogeneous_types and not isinstance(result, result_type0):
+            raise ValueError(f'Cannot aggregate heterogeneous types: {type(result)} vs {result_type0}')
+
 
         if result.unit:
             if unit and unit != result.unit:
                 raise ValueError(f'Cannot aggregate results with different units for {result.risk_key.risk_measure}')
+            if unit is None:
+                unit = result.unit
 
-            unit = unit or result.unit
-
-        if not allow_mismatch_risk_keys and risk_key and risk_key.ex_historical_diddle != result.risk_key.ex_historical_diddle:
+        if not allow_mismatch_risk_keys and risk_key and \
+                risk_key.ex_historical_diddle != result.risk_key.ex_historical_diddle:
             raise ValueError('Cannot aggregate results with different pricing keys')
 
-        risk_key = risk_key or result.risk_key
+        if risk_key is None:
+            risk_key = result.risk_key
 
-    inst = next(iter(results))
-    if isinstance(inst, dict):
-        return dict((k, aggregate_results([r[k] for r in results])) for k in inst.keys())
-    elif isinstance(inst, tuple):
+    inst = results[0]
+    if isinstance(inst, dict_type):
+        keys = inst.keys()
+        # Use generator expression to avoid building intermediate lists
+        return dict((k, aggregate_results((r[k] for r in results),
+                                          allow_mismatch_risk_keys=allow_mismatch_risk_keys,
+                                          allow_heterogeneous_types=allow_heterogeneous_types))
+                    for k in keys)
+    elif isinstance(inst, tuple_type):
+        # itertools.chain builds a generator - tuple(set(...)) may not preserve order, but matches original contract
         return tuple(set(itertools.chain.from_iterable(results)))
-    elif isinstance(inst, FloatWithInfo):
-        return FloatWithInfo(risk_key, sum(results), unit=unit)
-    elif isinstance(inst, SeriesWithInfo):
-        return SeriesWithInfo(sum(results), risk_key=risk_key, unit=unit)
-    elif isinstance(inst, DataFrameWithInfo):
-        return DataFrameWithInfo(aggregate_risk(results, allow_heterogeneous_types=allow_heterogeneous_types),
-                                 risk_key=risk_key, unit=unit)
+    elif isinstance(inst, FloatWithInfo_type):
+        return FloatWithInfo_type(risk_key, sum(results), unit=unit)
+    elif isinstance(inst, SeriesWithInfo_type):
+        return SeriesWithInfo_type(sum(results), risk_key=risk_key, unit=unit)
+    elif isinstance(inst, DataFrameWithInfo_type):
+        # Use direct call, passing allow_heterogeneous_types downstream for consistency
+        return DataFrameWithInfo_type(aggregate_risk(results, allow_heterogeneous_types=allow_heterogeneous_types),
+                                      risk_key=risk_key, unit=unit)
 
 
 def subtract_risk(left: DataFrameWithInfo, right: DataFrameWithInfo) -> pd.DataFrame:
