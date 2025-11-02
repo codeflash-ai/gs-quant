@@ -41,6 +41,12 @@ def decode_optional_date(value: Optional[str]) -> Optional[dt.date]:
     if value is None or isinstance(value, dt.date):
         return value
     elif isinstance(value, str):
+        # Fast path for ISO-8601 date format 'YYYY-MM-DD'
+        if len(value) == 10 and value[4] == '-' and value[7] == '-':
+            try:
+                return dt.date.fromisoformat(value)
+            except ValueError:
+                pass
         decoded_date_str = __try_decode_valid_date_formats(value)
         if decoded_date_str is not None:
             return decoded_date_str
@@ -88,6 +94,8 @@ def decode_iso_date_or_datetime(value: Any) -> Union[Tuple[DateOrDateTime, ...],
 def optional_from_isodatetime(datetime: Union[str, dt.datetime, None]) -> Optional[dt.datetime]:
     if datetime is None or isinstance(datetime, dt.datetime):
         return datetime
+    if datetime.endswith('Z'):
+        return dt.datetime.fromisoformat(datetime[:-1])
     return dt.datetime.fromisoformat(datetime.replace('Z', ''))
 
 
