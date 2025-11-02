@@ -13,6 +13,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 """
+
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Tuple
@@ -25,12 +26,11 @@ from gs_quant.session import GsSession
 
 
 class CacheEvent(Enum):
-    PUT = 'Put'
-    GET = 'Get'
+    PUT = "Put"
+    GET = "Get"
 
 
 class ApiRequestCache(ABC):
-
     def get(self, session: GsSession, key: Any, **kwargs):
         cache_lookup = self._get(session, key, **kwargs)
         if cache_lookup is not None:
@@ -54,7 +54,6 @@ class ApiRequestCache(ABC):
 
 
 class InMemoryApiRequestCache(ApiRequestCache):
-
     def __init__(self, max_size=1000, ttl_in_seconds=3600):
         self._cache = cachetools.TTLCache(max_size, ttl_in_seconds)
         self._records = []
@@ -66,8 +65,12 @@ class InMemoryApiRequestCache(ApiRequestCache):
         self._records.clear()
 
     def _make_str_key(self, key: Any):
-        if isinstance(key, (list, tuple)):
-            return "_".join(self._make_str_key(k) for k in key)
+        if isinstance(key, str):
+            return key
+        elif isinstance(key, (int, float, bool, type(None))):
+            return str(key)
+        elif isinstance(key, (list, tuple)):
+            return "_".join([self._make_str_key(k) for k in key])
         elif isinstance(key, (Base, pd.DataFrame)):
             return key.to_json()
         elif isinstance(key, dict):
