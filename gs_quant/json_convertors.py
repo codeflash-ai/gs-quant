@@ -297,28 +297,32 @@ def _get_dc_type(cls, name_field: str, allow_missing: bool):
 
 def _value_decoder(type_to_cls_map, explicit_cls=None, str_mapper=None):
     def decode_value(value):
-        if value is None or 'null' == value:
+        if value is None or value == 'null':
             return None
-        if isinstance(value, (list, tuple)):
-            return tuple(decode_value(v) for v in value)
-        if isinstance(value, str):
-            return str_mapper(value) if str_mapper is not None else value
+        # Short-circuit most common primitive types first for efficiency
         if isinstance(value, (float, int, dt.date)):
             return value
+        if isinstance(value, str):
+            return str_mapper(value) if str_mapper is not None else value
+        if isinstance(value, (list, tuple)):
+            return tuple(decode_value(v) for v in value)
         if not isinstance(value, dict):
             raise TypeError(f'Cannot decode object of type: {type(value)}')
         if explicit_cls is not None:
             return explicit_cls.from_dict(value)
-        else:
-            if 'class_type' not in value:
-                raise ValueError(f'Object has no "class_type" property {value}')
+        # Use local variable lookup for a slight speedup
+        try:
             obj_type = value['class_type']
-            if obj_type not in type_to_cls_map:
-                raise ValueError(f'No class mapping for object type: "{obj_type}"')
-            try:
-                return type_to_cls_map[obj_type].from_dict(value)
-            except Exception as e:
-                raise ValueError(f'Failed to de-serialise {type_to_cls_map[obj_type]} from value {value}') from e
+        except KeyError:
+            raise ValueError(f'Object has no "class_type" property {value}')
+        # Avoid double dict lookup
+        cls = type_to_cls_map.get(obj_type)
+        if cls is None:
+            raise ValueError(f'No class mapping for object type: "{obj_type}"')
+        try:
+            return cls.from_dict(value)
+        except Exception as e:
+            raise ValueError(f'Failed to de-serialise {cls} from value {value}') from e
 
     return decode_value
 
