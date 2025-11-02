@@ -22,6 +22,8 @@ import pandas as pd
 from dataclasses_json import config
 from dateutil.parser import isoparse
 
+_dt_time = dt.time
+
 __valid_date_formats = ('%Y-%m-%d',  # '2020-07-28'
                         '%d%b%y',  # '28Jul20'
                         '%d%b%Y',  # '28Jul2020'
@@ -51,10 +53,10 @@ def decode_optional_date(value: Optional[str]) -> Optional[dt.date]:
 def decode_optional_time(value: Optional[str]) -> Optional[dt.time]:
     # from dataclasses-json 0.6.5 onwards the global config for type T will be applied to Optional[T]
     # So this decoder would become redundant, to allow any version we simply return if it's already a time
-    if value is None or isinstance(value, dt.time):
+    if value is None or isinstance(value, _dt_time):
         return value
     elif isinstance(value, str):
-        return dt.time.fromisoformat(value)
+        return _dt_time.fromisoformat(value)
 
     raise ValueError(f'Cannot convert {value} to date')
 
