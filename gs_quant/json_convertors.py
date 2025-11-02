@@ -284,20 +284,20 @@ def encode_named_dictable(o):
 
 
 def _get_dc_type(cls, name_field: str, allow_missing: bool):
-    type_field = list(filter(lambda f: f.name in (name_field, f'{name_field}_'), fields(cls)))
-    if len(type_field) == 0:
-        if allow_missing:
-            return None
-        raise ValueError(f'Class {cls} has no "{name_field}" property')
-    def_value = type_field[0].default
-    if def_value == MISSING or def_value is None:
-        raise ValueError('No default value for "class_type" field on class')
-    return def_value
+    for f in fields(cls):
+        if f.name == name_field or f.name == f'{name_field}_':
+            def_value = f.default
+            if def_value == MISSING or def_value is None:
+                raise ValueError('No default value for "class_type" field on class')
+            return def_value
+    if allow_missing:
+        return None
+    raise ValueError(f'Class {cls} has no "{name_field}" property')
 
 
 def _value_decoder(type_to_cls_map, explicit_cls=None, str_mapper=None):
     def decode_value(value):
-        if value is None or 'null' == value:
+        if value is None or value == 'null':
             return None
         if isinstance(value, (list, tuple)):
             return tuple(decode_value(v) for v in value)
@@ -309,21 +309,25 @@ def _value_decoder(type_to_cls_map, explicit_cls=None, str_mapper=None):
             raise TypeError(f'Cannot decode object of type: {type(value)}')
         if explicit_cls is not None:
             return explicit_cls.from_dict(value)
-        else:
-            if 'class_type' not in value:
-                raise ValueError(f'Object has no "class_type" property {value}')
-            obj_type = value['class_type']
-            if obj_type not in type_to_cls_map:
-                raise ValueError(f'No class mapping for object type: "{obj_type}"')
-            try:
-                return type_to_cls_map[obj_type].from_dict(value)
-            except Exception as e:
-                raise ValueError(f'Failed to de-serialise {type_to_cls_map[obj_type]} from value {value}') from e
+        if 'class_type' not in value:
+            raise ValueError(f'Object has no "class_type" property {value}')
+        obj_type = value['class_type']
+        if obj_type not in type_to_cls_map:
+            raise ValueError(f'No class mapping for object type: "{obj_type}"')
+        try:
+            return type_to_cls_map[obj_type].from_dict(value)
+        except Exception as e:
+            raise ValueError(f'Failed to de-serialise {type_to_cls_map[obj_type]} from value {value}') from e
+
 
     return decode_value
 
 
 def dc_decode(*classes, name_field='class_type', allow_missing=False):
-    mappings = ((_get_dc_type(cls, name_field, allow_missing), cls) for cls in classes)
-    type_to_cls_map = dict((k, v) for k, v in mappings if k is not None)
+    # Preallocate target dictionary directly (skip generator/list intermediate)
+    type_to_cls_map = {}
+    for cls in classes:
+        k = _get_dc_type(cls, name_field, allow_missing)
+        if k is not None:
+            type_to_cls_map[k] = cls
     return _value_decoder(type_to_cls_map, None)
