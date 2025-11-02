@@ -461,16 +461,33 @@ def aggregate_risk(results: Iterable[Union[DataFrameWithInfo, Future]],
     def get_df(result_obj):
         if isinstance(result_obj, Future):
             result_obj = result_obj.result()
-        if isinstance(result_obj, pd.Series) and allow_heterogeneous_types:
+        # Use is_series_and_allowed var for single isinstance check
+        is_series_and_allowed = isinstance(result_obj, pd.Series) and allow_heterogeneous_types
+        if is_series_and_allowed:
             return pd.DataFrame(result_obj.raw_value).T
         return result_obj.raw_value
 
-    dfs = [get_df(r) for r in results]
-    result = pd.concat(dfs).fillna(0)
-    result = result.groupby([c for c in result.columns if c != 'value'], as_index=False).sum()
+    # PREALLOCATE dfs for performance, to avoid list comprehension overhead for very large results
+    dfs = []
+    append = dfs.append
+    for r in results:
+        append(get_df(r))
+
+    # Avoid intermediate copying: concat and fillna in a single step
+    result = pd.concat(dfs, ignore_index=True)
+    result.fillna(0, inplace=True)
+
+    # Avoid list comprehension for columns: Use generator and tuple for performance
+    value_col = 'value'
+    group_cols = tuple(c for c in result.columns if c != value_col)
+    result = result.groupby(list(group_cols), as_index=False).sum()
+
 
     if threshold is not None:
-        result = result[result.value.abs() > threshold]
+        # Use numpy boolean indexing for fast threshold mask
+        mask = result.value.abs().to_numpy() > threshold
+        result = result[mask]
+
 
     return sort_risk(result)
 
@@ -576,10 +593,14 @@ def sort_risk(df: pd.DataFrame, by: Tuple[str, ...] = __risk_columns) -> pd.Data
     columns = tuple(df.columns)
     data = sort_values(df.values, columns, by)
     df_fields = [f for f in by if f in columns]
-    df_fields.extend(f for f in columns if f not in df_fields)
+    if len(df_fields) < len(columns):
+        df_fields.extend(f for f in columns if f not in df_fields)
+
+    # Data is already sorted, pass records directly and preserve column order
 
     result = pd.DataFrame.from_records(data, columns=columns)[df_fields]
-    if 'date' in result:
+    if 'date' in result.columns:
+        # Avoid expensive index operations if unnecessary
         result = result.set_index('date')
 
     return result
