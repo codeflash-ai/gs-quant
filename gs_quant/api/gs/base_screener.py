@@ -137,4 +137,4 @@ class GsBaseScreenerApi:
 
         :return: None
         """
-        return GsSession.current._delete('/data/screeners/{id}'.format(id=screener_id))
+        return GsSession.current._delete(f'/data/screeners/{screener_id}')
