@@ -19,7 +19,7 @@ from collections import namedtuple
 from enum import Enum, auto
 from functools import partial
 from numbers import Real
-from typing import Union, Optional, Tuple, List
+from typing import List, Optional, Tuple, Union
 
 import cachetools.func
 import inflection
@@ -27,30 +27,41 @@ import numpy as np
 import pandas as pd
 from dateutil import tz
 from dateutil.relativedelta import relativedelta
-from pandas.tseries.holiday import AbstractHolidayCalendar, Holiday, USLaborDay, USMemorialDay, USThanksgivingDay, \
-    sunday_to_monday
+from pandas.tseries.holiday import (AbstractHolidayCalendar, Holiday,
+                                    USLaborDay, USMemorialDay,
+                                    USThanksgivingDay, sunday_to_monday)
 from pydash import chunk, flatten, get
 
 from gs_quant.api.gs.assets import GsAssetApi, GsIdType
-from gs_quant.api.gs.data import MarketDataResponseFrame, QueryType, GsDataApi
+from gs_quant.api.gs.data import GsDataApi, MarketDataResponseFrame, QueryType
 from gs_quant.api.gs.indices import GsIndexApi
 from gs_quant.api.utils import ThreadPoolManager
 from gs_quant.common import AssetClass, AssetType, PricingLocation
 from gs_quant.data import Dataset
 from gs_quant.data.core import DataContext, IntervalFrequency
-from gs_quant.data.fields import Fields, DataMeasure
+from gs_quant.data.fields import DataMeasure, Fields
 from gs_quant.data.log import log_debug, log_warning
 from gs_quant.datetime import DAYS_IN_YEAR
 from gs_quant.datetime.gscalendar import GsCalendar
 from gs_quant.datetime.point import relative_date_add
 from gs_quant.entities.entity import PositionedEntity
-from gs_quant.errors import MqValueError, MqTypeError
-from gs_quant.markets.securities import Asset, AssetIdentifier, AssetType as SecAssetType, SecurityMaster, Stock
-from gs_quant.timeseries import Basket, RelativeDate, Returns, Window, sqrt, volatility
-from gs_quant.timeseries.helper import (_month_to_tenor, _split_where_conditions, _tenor_to_month, _to_offset,
-                                        check_forward_looking, get_dataset_with_many_assets, get_df_with_retries,
-                                        log_return, plot_measure)
-from gs_quant.timeseries.measures_helper import EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq
+from gs_quant.errors import MqTypeError, MqValueError
+from gs_quant.markets.securities import Asset, AssetIdentifier
+from gs_quant.markets.securities import AssetType as SecAssetType
+from gs_quant.markets.securities import SecurityMaster, Stock
+from gs_quant.timeseries import (Basket, RelativeDate, Returns, Window, sqrt,
+                                 volatility)
+from gs_quant.timeseries.helper import (_month_to_tenor,
+                                        _split_where_conditions,
+                                        _tenor_to_month, _to_offset,
+                                        check_forward_looking,
+                                        get_dataset_with_many_assets,
+                                        get_df_with_retries, log_return,
+                                        plot_measure)
+from gs_quant.timeseries.measures_helper import (
+    EdrDataReference, VolReference, preprocess_implied_vol_strikes_eq)
+
+_TENOR_MONTH_PATTERN = re.compile(r'(\d+)m')
 
 GENERIC_DATE = Union[dt.date, str]
 ASSET_SPEC = Union[Asset, str]
@@ -863,11 +874,11 @@ def implied_volatility(asset: Asset, tenor: str, strike_reference: VolReference 
 
 
 def _tenor_month_to_year(tenor: str):
-    matched = re.fullmatch('(\\d+)m', tenor)
+    matched = _TENOR_MONTH_PATTERN.fullmatch(tenor)
     if matched:
         month = int(matched[1])
         if month % 12 == 0:
-            return str(int(month / 12)) + 'y'
+            return str(month // 12) + 'y'
     return tenor
 
 
