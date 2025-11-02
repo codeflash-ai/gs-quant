@@ -125,9 +125,8 @@ def build_query_string(dimensions):
 
 
 def valid_dimensions(query_dimensions: Tuple[str, Union[str, float, bool]], df: pd.DataFrame) -> bool:
-    columns = df.columns
+    columns_set = set(df.columns)
     for query_dimension in query_dimensions:
-        dimension = query_dimension[0]
-        if dimension not in columns:
+        if query_dimension[0] not in columns_set:
             return False
     return True
