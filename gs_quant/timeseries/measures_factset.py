@@ -27,6 +27,7 @@ from gs_quant.markets.securities import AssetIdentifier, Asset
 from gs_quant.timeseries import RelativeDate
 from gs_quant.timeseries.helper import plot_measure
 from gs_quant.timeseries.measures import ExtendedSeries
+import numpy as np
 
 
 class EstimateItem(Enum):
@@ -1220,9 +1221,21 @@ def factset_estimates(asset: Asset, metric: EstimateItem = EstimateItem.EPS,
                 raise MqValueError('No Data returned for selected fiscal period')
 
         df = df.fillna({'consEndDate': end})
-        df['date_range'] = df.apply(lambda row: pd.date_range(row['date'], row['consEndDate']), axis=1)
-        df = df.explode('date_range').drop(columns=['date', 'consEndDate']).rename(
-            columns={'date_range': 'date'})
+        
+        # Optimized date range expansion using vectorized operations
+        dates = pd.to_datetime(df['date'])
+        cons_end_dates = pd.to_datetime(df['consEndDate'])
+        day_length = ((cons_end_dates - dates).dt.days + 1).values
+        mask = day_length > 0
+        repeated_idx = np.repeat(np.arange(len(df))[mask], day_length[mask])
+        date_offsets = np.concatenate([
+            np.arange(dl) for dl in day_length[mask]
+        ])
+        new_dates = dates.iloc[mask].values[0] + pd.to_timedelta(date_offsets, unit='D')
+        df_expanded = df.iloc[repeated_idx].copy()
+        df_expanded['date'] = new_dates
+        df = df_expanded.drop(columns=['consEndDate']).reset_index(drop=True)
+
         column = f'fe{column_prefix}{statistic.value}{basis_cl}'
     else:
         df['date'] = pd.to_datetime(df['date'])
