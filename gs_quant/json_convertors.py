@@ -115,7 +115,12 @@ def decode_dict_dict_date_key(value):
 
 
 def decode_dict_date_value(value):
-    return {k: dt.date.fromisoformat(d) for k, d in value.items()} if value is not None else None
+    if value is None:
+        return None
+    # Optimize by using local variable lookup and avoid attribute lookup inside comprehension
+    fromisoformat = dt.date.fromisoformat
+    items = value.items()
+    return {k: fromisoformat(d) for k, d in items}
 
 
 def decode_datetime_tuple(blob: Tuple[str, ...]):
