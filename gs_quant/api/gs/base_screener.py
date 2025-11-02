@@ -85,7 +85,7 @@ class GsBaseScreenerApi:
         assert screener_id == screener.id
 
         request_headers = {'Content-Type': 'application/json;charset=utf-8'}
-        return GsSession.current._put('/data/screeners/{id}'.format(id=screener_id), screener,
+        return GsSession.current._put(f'/data/screeners/{screener_id}', screener,
                                       request_headers=request_headers, cls=Screener)
 
     @classmethod
