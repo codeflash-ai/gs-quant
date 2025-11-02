@@ -60,7 +60,8 @@ def decode_optional_time(value: Optional[str]) -> Optional[dt.time]:
 
 
 def encode_optional_time(value: Optional[Union[str, dt.time]]) -> Optional[str]:
-    return value.isoformat() if isinstance(value, dt.time) else value
+    dt_time = dt.time
+    return value.isoformat() if isinstance(value, dt_time) else value
 
 
 def decode_date_tuple(blob: Tuple[str, ...]):
