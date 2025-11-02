@@ -686,12 +686,14 @@ def _get_overrides(row_overrides: List[Override],
 
     dimensions_overrides, value_override, processor_override = [], None, None
     for override in row_overrides:
-        if column_name in override.column_names:
-            if isinstance(override, DimensionsOverride):
+        column_names = override.column_names
+        if column_name in column_names:
+            typ = type(override)
+            if typ is DimensionsOverride:
                 dimensions_overrides.append(override)
-            elif isinstance(override, ValueOverride):
+            elif typ is ValueOverride:
                 value_override = override
-            elif isinstance(override, ProcessorOverride):
+            elif typ is ProcessorOverride:
                 processor_override = override.processor
 
     return dimensions_overrides, value_override, processor_override
