@@ -15,15 +15,12 @@ under the License.
 """
 
 import copy
-
 from enum import Enum
-from typing import Tuple, Dict, Optional, Union
+from typing import Dict, Optional, Tuple, Union
 
+from gs_quant import common, risk
 from gs_quant.base import RiskMeasureParameter
-from gs_quant.common import RiskMeasure, ParameterisedRiskMeasure
-
-from gs_quant import common
-from gs_quant import risk
+from gs_quant.common import ParameterisedRiskMeasure, RiskMeasure
 
 
 def gsq_rm_for_name(name: str) -> Optional[RiskMeasure]:
@@ -34,8 +31,9 @@ def gsq_rm_for_name(name: str) -> Optional[RiskMeasure]:
 
 def encode_risk_measure(rm: RiskMeasure) -> Dict:
     result = rm.as_dict(as_camel_case=True)
-    if rm.parameters is not None:
-        result['parameters'] = rm.parameters.as_dict(as_camel_case=True)
+    params = rm.parameters
+    if params is not None:
+        result['parameters'] = params.as_dict(as_camel_case=True)
     return result
 
 
